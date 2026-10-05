@@ -108,12 +108,12 @@ renderTimer();
 if(!isPaused) setInterval(tick,1000);
 setInterval(saveState,10000);
 
-document.getElementById('pauseButton')?.addEventListener('click',async()=>{
+document.getElementById('pauseForm')?.addEventListener('submit',async e=>{
+  e.preventDefault();
   const button=document.getElementById('pauseButton');
-  const pauseForm=document.getElementById('pauseForm');
   if(button) button.disabled=true;
   await saveState();
-  pauseForm?.submit();
+  e.currentTarget.submit();
 });
 
 window.addEventListener('beforeunload',()=>{
