@@ -95,4 +95,4 @@ setInterval(tick,1000);
 show(i,true);
 updateMap();
 renderTimer();
-setInterval(saveState,10000);
+setInterval(saveState,10000);\n\nwindow.addEventListener('beforeunload',()=>{\n  try{ navigator.sendBeacon('/salvar',new Blob([JSON.stringify(collectState())],{type:'application/json'})); }catch(e){}\n});
