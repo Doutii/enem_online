@@ -40,7 +40,7 @@ def load_exams():
     except (OSError,json.JSONDecodeError): return
     for sid,e in data.items():
         if os.path.exists(e.get('prova','')) and os.path.exists(e.get('gabarito','')) and os.path.isdir(e.get('asset_dir','')):
-            e['chutes']=set(e.get('chutes',[])); e.setdefault('answers',{}); e.setdefault('current_question',0); e.setdefault('started_at',None); e.setdefault('completed',False); e.setdefault('updated_at',0); e.setdefault('history',[]); EXAMS[sid]=e
+            e['chutes']=set(e.get('chutes',[])); e.setdefault('answers',{}); e.setdefault('current_question',0); e.setdefault('started_at',None); e.setdefault('paused',False); e.setdefault('paused_remaining',DURATION_SECONDS); e.setdefault('completed',False); e.setdefault('updated_at',0); e.setdefault('history',[]); EXAMS[sid]=e
 
 
 def timestamp_br(value):
@@ -94,6 +94,8 @@ def study_summary(exam):
     return grouped
 
 def remaining_seconds(exam):
+    if exam.get('paused'):
+        return max(0,int(exam.get('paused_remaining',DURATION_SECONDS)))
     if not exam.get('started_at'): return DURATION_SECONDS
     return max(0,DURATION_SECONDS-int(time.time()-float(exam['started_at'])))
 
@@ -226,7 +228,7 @@ def importar():
     except OSError: pass
     for q in questions: q['asset_dir']=asset_dir
     if len(questions)!=90: flash(f'Importação parcial: foram identificadas {len(questions)} questões. Verifique os PDFs correspondentes.')
-    EXAMS[sid]={'prova':ppath,'gabarito':gpath,'language':language,'title':'ENEM — Caderno Azul','questions':questions,'asset_dir':asset_dir,'answers':{},'chutes':set(),'current_question':0,'started_at':time.time(),'completed':False,'updated_at':time.time(),'history':[]}
+    EXAMS[sid]={'prova':ppath,'gabarito':gpath,'language':language,'title':'ENEM — Caderno Azul','questions':questions,'asset_dir':asset_dir,'answers':{},'chutes':set(),'current_question':0,'started_at':time.time(),'paused':False,'paused_remaining':DURATION_SECONDS,'completed':False,'updated_at':time.time(),'history':[]}
     save_catalog(); session['exam_id']=sid
     return redirect(url_for('prova'))
 
@@ -238,6 +240,8 @@ def refazer(sid):
     exam['chutes']=set()
     exam['current_question']=0
     exam['started_at']=time.time()
+    exam['paused']=False
+    exam['paused_remaining']=DURATION_SECONDS
     exam['completed']=False
     exam['updated_at']=time.time()
     save_catalog()
@@ -255,8 +259,20 @@ def prova():
     exam=EXAMS.get(session.get('exam_id'))
     if not exam: return redirect(url_for('index'))
     if exam.get('completed'): return redirect(url_for('resultado'))
-    if not exam.get('started_at'): exam['started_at']=time.time(); save_catalog()
-    return render_template('prova.html',exam=exam,answers=exam.get('answers',{}),chutes=exam.get('chutes',set()),remaining=remaining_seconds(exam),current_question=exam.get('current_question',0))
+    if not exam.get('started_at') and not exam.get('paused'): exam['started_at']=time.time(); save_catalog()
+    return render_template('prova.html',exam=exam,answers=exam.get('answers',{}),chutes=exam.get('chutes',set()),remaining=remaining_seconds(exam),current_question=exam.get('current_question',0),paused=exam.get('paused',False))
+
+@app.route('/pausar',methods=['POST'])
+def pausar():
+    exam=EXAMS.get(session.get('exam_id'))
+    if not exam: return redirect(url_for('index'))
+    if exam.get('completed'): return redirect(url_for('resultado'))
+    exam['paused_remaining']=remaining_seconds(exam)
+    exam['paused']=True
+    exam['started_at']=None
+    exam['updated_at']=time.time()
+    save_catalog()
+    return redirect(url_for('index'))
 
 @app.route('/salvar',methods=['POST'])
 def salvar():
