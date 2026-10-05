@@ -1,18 +1,52 @@
 from flask import Flask, render_template, request, redirect, url_for, send_file, session, flash
 import fitz
-import os, re, json, uuid, zipfile
+import os, re, json, uuid, time, hashlib
 from werkzeug.utils import secure_filename
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 UPLOADS = os.path.join(BASE, 'uploads')
 GENERATED = os.path.join(BASE, 'generated')
+DATA = os.path.join(BASE, 'data')
+CATALOG = os.path.join(DATA, 'exams.json')
+DURATION_SECONDS = 5 * 60 * 60 + 30 * 60
 os.makedirs(UPLOADS, exist_ok=True)
 os.makedirs(GENERATED, exist_ok=True)
+os.makedirs(DATA, exist_ok=True)
 
 app = Flask(__name__)
 app.secret_key = 'enem-online-local-change-me'
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024
 EXAMS = {}
+
+def file_sha256(path):
+    h=hashlib.sha256()
+    with open(path,'rb') as f:
+        for chunk in iter(lambda:f.read(1024*1024),b''): h.update(chunk)
+    return h.hexdigest()
+
+def save_catalog():
+    data={}
+    for sid,e in EXAMS.items():
+        data[sid]={k:v for k,v in e.items() if k!='chutes'}
+        data[sid]['chutes']=sorted(e.get('chutes',set()))
+    tmp=CATALOG+'.tmp'
+    with open(tmp,'w',encoding='utf-8') as f: json.dump(data,f,ensure_ascii=False,indent=2)
+    os.replace(tmp,CATALOG)
+
+def load_exams():
+    if not os.path.exists(CATALOG): return
+    try:
+        with open(CATALOG,encoding='utf-8') as f: data=json.load(f)
+    except (OSError,json.JSONDecodeError): return
+    for sid,e in data.items():
+        if os.path.exists(e.get('prova','')) and os.path.exists(e.get('gabarito','')) and os.path.isdir(e.get('asset_dir','')):
+            e['chutes']=set(e.get('chutes',[])); e.setdefault('answers',{}); e.setdefault('current_question',0); e.setdefault('started_at',None); e.setdefault('completed',False); e.setdefault('updated_at',0); EXAMS[sid]=e
+
+def remaining_seconds(exam):
+    if not exam.get('started_at'): return DURATION_SECONDS
+    return max(0,DURATION_SECONDS-int(time.time()-float(exam['started_at'])))
+
+load_exams()
 
 LETTERS = ['A','B','C','D','E']
 
@@ -50,7 +84,7 @@ def render_question_image(doc, page_idx, block, out_dir):
     top=max(0, block['y0']-8)
     rect=fitz.Rect(left, top, right, bottom)
     pix=page.get_pixmap(matrix=fitz.Matrix(1.6,1.6), clip=rect, alpha=False)
-    filename=f"q{block['n']:02d}_{page_idx+1}_{uuid.uuid4().hex[:8]}.png"
+    filename=f"q{block['n']:02d}_{page_idx+1}.png"
     path=os.path.join(out_dir, filename)
     pix.save(path)
     return filename
@@ -109,154 +143,114 @@ def make_wrong_pdf(prova_path, question_records, selected_numbers, output_path):
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    cards=[{'id':sid,'title':e.get('title','ENEM — Caderno Azul'),'answered':len(e.get('answers',{})),'total':len(e.get('questions',[])),'completed':e.get('completed',False),'updated_at':e.get('updated_at',0)} for sid,e in EXAMS.items()]
+    cards.sort(key=lambda x:x['updated_at'],reverse=True)
+    return render_template('index.html',saved_exams=cards)
 
-@app.route('/importar', methods=['POST'])
+@app.route('/importar',methods=['POST'])
 def importar():
-    prova=request.files.get('prova')
-    gabarito=request.files.get('gabarito')
-    language=request.form.get('language','ingles')
+    prova=request.files.get('prova'); gabarito=request.files.get('gabarito'); language=request.form.get('language','ingles')
     if not prova or not gabarito:
-        flash('Selecione o PDF da prova e o PDF do gabarito.')
-        return redirect(url_for('index'))
-    sid=uuid.uuid4().hex
-    ppath=os.path.join(UPLOADS, sid+'_prova.pdf')
-    gpath=os.path.join(UPLOADS, sid+'_gabarito.pdf')
-    prova.save(ppath); gabarito.save(gpath)
+        flash('Selecione o PDF da prova e o PDF do gabarito.'); return redirect(url_for('index'))
+    temp=uuid.uuid4().hex; ptmp=os.path.join(UPLOADS,temp+'_prova.pdf'); gtmp=os.path.join(UPLOADS,temp+'_gabarito.pdf')
+    prova.save(ptmp); gabarito.save(gtmp)
+    ph=file_sha256(ptmp); gh=file_sha256(gtmp); sid=hashlib.sha256(f'{ph}:{gh}:{language}'.encode()).hexdigest()[:24]
+    ppath=os.path.join(UPLOADS,sid+'_prova.pdf'); gpath=os.path.join(UPLOADS,sid+'_gabarito.pdf')
+    if os.path.exists(ppath): os.remove(ptmp)
+    else: os.replace(ptmp,ppath)
+    if os.path.exists(gpath): os.remove(gtmp)
+    else: os.replace(gtmp,gpath)
+    if sid in EXAMS:
+        session['exam_id']=sid; flash('Esta prova já está salva. Reabrindo a prova existente, sem duplicar imagens.'); return redirect(url_for('prova'))
+    asset_dir=os.path.join(GENERATED,sid)
     try:
-        questions, asset_dir=parse_prova(ppath,gpath,language)
+        questions,tmp_dir=parse_prova(ppath,gpath,language)
     except Exception as e:
-        flash('Não foi possível interpretar os PDFs: '+str(e))
-        return redirect(url_for('index'))
-    if len(questions) != 90:
-        flash(f'Importação parcial: foram identificadas {len(questions)} questões. Verifique se o PDF é o Caderno Azul do 1º dia e o gabarito correspondente.')
+        flash('Não foi possível interpretar os PDFs: '+str(e)); return redirect(url_for('index'))
+    os.makedirs(asset_dir,exist_ok=True)
+    for name in os.listdir(tmp_dir):
+        src=os.path.join(tmp_dir,name); dst=os.path.join(asset_dir,name)
+        if not os.path.exists(dst): os.replace(src,dst)
+    try: os.rmdir(tmp_dir)
+    except OSError: pass
     for q in questions: q['asset_dir']=asset_dir
-    EXAMS[sid]={
-        'prova':ppath,
-        'gabarito':gpath,
-        'language':language,
-        'questions':questions,
-        'asset_dir':asset_dir,
-        'answers':{},
-        'chutes':set()
-    }
-    session['exam_id']=sid
+    if len(questions)!=90: flash(f'Importação parcial: foram identificadas {len(questions)} questões. Verifique os PDFs correspondentes.')
+    EXAMS[sid]={'prova':ppath,'gabarito':gpath,'language':language,'title':'ENEM — Caderno Azul','questions':questions,'asset_dir':asset_dir,'answers':{},'chutes':set(),'current_question':0,'started_at':time.time(),'completed':False,'updated_at':time.time()}
+    save_catalog(); session['exam_id']=sid
     return redirect(url_for('prova'))
+
+@app.route('/abrir/<sid>')
+def abrir(sid):
+    if sid not in EXAMS: return redirect(url_for('index'))
+    session['exam_id']=sid
+    return redirect(url_for('resultado') if EXAMS[sid].get('completed') else url_for('prova'))
 
 @app.route('/prova')
 def prova():
     exam=EXAMS.get(session.get('exam_id'))
     if not exam: return redirect(url_for('index'))
-    return render_template(
-        'prova.html',
-        exam=exam,
-        answers=exam.get('answers',{}),
-        chutes=exam.get('chutes',set())
-    )
+    if exam.get('completed'): return redirect(url_for('resultado'))
+    if not exam.get('started_at'): exam['started_at']=time.time(); save_catalog()
+    return render_template('prova.html',exam=exam,answers=exam.get('answers',{}),chutes=exam.get('chutes',set()),remaining=remaining_seconds(exam),current_question=exam.get('current_question',0))
 
-@app.route('/responder', methods=['POST'])
+@app.route('/salvar',methods=['POST'])
+def salvar():
+    exam=EXAMS.get(session.get('exam_id'))
+    if not exam: return jsonify({'ok':False}),404
+    data=request.get_json(silent=True) or {}
+    exam['answers']={str(k):v for k,v in data.get('answers',{}).items() if v in LETTERS}
+    exam['chutes']=set(int(x) for x in data.get('chutes',[]))
+    exam['current_question']=max(0,min(len(exam['questions'])-1,int(data.get('current_question',0))))
+    exam['updated_at']=time.time(); save_catalog()
+    return jsonify({'ok':True,'remaining':remaining_seconds(exam)})
+
+@app.route('/responder',methods=['POST'])
 def responder():
     exam=EXAMS.get(session.get('exam_id'))
     if not exam: return redirect(url_for('index'))
-    answers=exam.get('answers',{})
-    chutes=exam.get('chutes',set())
-
+    answers=exam.get('answers',{}); chutes=exam.get('chutes',set())
     for q in exam['questions']:
-        number=str(q['numero'])
-        v=request.form.get(f"q{number}")
-        if v:
-            answers[number]=v
-        if request.form.get(f"chute_{number}") == '1':
-            chutes.add(int(number))
-        else:
-            chutes.discard(int(number))
-
-    exam['answers']=answers
-    exam['chutes']=chutes
-
-    if request.form.get('finalizar'):
-        return redirect(url_for('resultado'))
-    return redirect(url_for('prova'))
+        n=str(q['numero']); v=request.form.get('q'+n)
+        if v: answers[n]=v
+        if request.form.get('chute_'+n)=='1': chutes.add(int(n))
+        else: chutes.discard(int(n))
+    exam['answers']=answers; exam['chutes']=chutes; exam['updated_at']=time.time()
+    if request.form.get('finalizar') or remaining_seconds(exam)<=0: exam['completed']=True
+    save_catalog()
+    return redirect(url_for('resultado' if exam.get('completed') else 'prova'))
 
 @app.route('/resultado')
 def resultado():
     exam=EXAMS.get(session.get('exam_id'))
     if not exam: return redirect(url_for('index'))
-
-    answers=exam.get('answers',{})
-    chutes=exam.get('chutes',set())
-    rows=[]
-    wrong=[]
-    correct=0
-    chute_count=0
-    chute_correct=0
-    chute_wrong=0
-
+    answers=exam.get('answers',{}); chutes=exam.get('chutes',set()); rows=[]; correct=chute_count=chute_correct=chute_wrong=0
     for q in exam['questions']:
-        number=q['numero']
-        user=answers.get(str(number))
-        ok=user == q['resposta']
-        is_chute=number in chutes
-
-        if ok:
-            correct+=1
-        else:
-            wrong.append(number)
-
-        if is_chute:
-            chute_count+=1
-            if ok:
-                chute_correct+=1
-            else:
-                chute_wrong+=1
-
-        rows.append({
-            'numero':number,
-            'user':user or '—',
-            'correct':q['resposta'],
-            'ok':ok,
-            'chute':is_chute
-        })
-
-    return render_template(
-        'resultado.html',
-        total=len(rows),
-        correct=correct,
-        wrong=len(rows)-correct,
-        chute_count=chute_count,
-        chute_correct=chute_correct,
-        chute_wrong=chute_wrong,
-        rows=rows,
-        exam=exam
-    )
+        n=q['numero']; user=answers.get(str(n)); ok=user==q['resposta']; is_chute=n in chutes
+        correct+=int(ok)
+        if is_chute: chute_count+=1; chute_correct+=int(ok); chute_wrong+=int(not ok)
+        rows.append({'numero':n,'user':user or '—','correct':q['resposta'],'ok':ok,'chute':is_chute})
+    area_stats=[]
+    for name,a,b in [('Linguagens',1,45),('Ciências Humanas',46,90)]:
+        sub=[r for r in rows if a<=r['numero']<=b]; ac=sum(r['ok'] for r in sub)
+        area_stats.append({'name':name,'correct':ac,'total':len(sub),'percent':ac*100/len(sub) if sub else 0})
+    return render_template('resultado.html',total=len(rows),correct=correct,wrong=len(rows)-correct,chute_count=chute_count,chute_correct=chute_correct,chute_wrong=chute_wrong,rows=rows,exam=exam,area_stats=area_stats)
 
 @app.route('/baixar-erros')
 def baixar_erros():
     exam=EXAMS.get(session.get('exam_id'))
     if not exam: return redirect(url_for('index'))
-
-    answers=exam.get('answers',{})
-    chutes=exam.get('chutes',set())
-
-    # O PDF de estudo reúne toda questão errada + toda questão marcada como chute,
-    # inclusive chutes que por acaso tenham sido acertados.
-    selected=set()
-    for q in exam['questions']:
-        number=q['numero']
-        if answers.get(str(number)) != q['resposta'] or number in chutes:
-            selected.add(number)
-
-    output=os.path.join(GENERATED, f"ENEM_questoes_revisao_{uuid.uuid4().hex[:8]}.pdf")
-    make_wrong_pdf(exam['prova'], exam['questions'], selected, output)
-    return send_file(output, as_attachment=True, download_name='ENEM_questoes_revisao.pdf')
+    answers=exam.get('answers',{}); chutes=exam.get('chutes',set())
+    selected={q['numero'] for q in exam['questions'] if answers.get(str(q['numero']))!=q['resposta'] or q['numero'] in chutes}
+    output=os.path.join(GENERATED,f"ENEM_questoes_revisao_{uuid.uuid4().hex[:8]}.pdf")
+    make_wrong_pdf(exam['prova'],exam['questions'],selected,output)
+    return send_file(output,as_attachment=True,download_name='ENEM_questoes_revisao.pdf')
 
 @app.route('/static/question/<path:filename>')
 def question_asset(filename):
     exam=EXAMS.get(session.get('exam_id'))
     if not exam: return '',404
-    asset_dir=exam.get('asset_dir','')
-    safe=os.path.basename(filename)
-    return send_file(os.path.join(asset_dir,safe))
+    safe=os.path.basename(filename); path=os.path.join(exam.get('asset_dir',''),safe)
+    return send_file(path) if os.path.isfile(path) else ('',404)
 
 if __name__=='__main__':
     app.run(debug=True, host='127.0.0.1', port=5000)
