@@ -108,14 +108,7 @@ renderTimer();
 if(!isPaused) setInterval(tick,1000);
 setInterval(saveState,10000);
 
-document.getElementById('pauseForm')?.addEventListener('submit',async e=>{
-  e.preventDefault();
-  const button=document.getElementById('pauseButton');
-  if(button) { button.disabled=true; button.textContent='⏸ Pausando...'; }
-  await saveState();
-  e.currentTarget.submit();
-});
-
+// O formulário de pausa usa submit nativo para garantir que a pausa sempre seja enviada ao servidor.
 window.addEventListener('beforeunload',()=>{
   try{
     navigator.sendBeacon('/salvar',new Blob([JSON.stringify(collectState())],{type:'application/json'}));
