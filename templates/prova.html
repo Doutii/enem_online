@@ -1,1 +1,64 @@
-<!doctype html><html lang="pt-br"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ENEM Online</title><link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"></head><body><main class="exam"><header><div><strong>ENEM Online</strong><span class="muted"> — Caderno Azul</span></div><div id="progress"></div></header><form action="{{ url_for('responder') }}" method="post" id="examForm"><div id="questions">{% for q in exam.questions %}<section class="question" data-num="{{ q.numero }}"><h2>Questão {{ '%02d'|format(q.numero) }}</h2><div class="question-img-wrap"><img class="question-img" src="{{ url_for('question_asset', filename=q.imagem) }}" alt="Questão {{ q.numero }}"></div><div class="choices">{% for l in ['A','B','C','D','E'] %}<label><input type="radio" name="q{{ q.numero }}" value="{{ l }}" {% if answers.get(q.numero|string)==l %}checked{% endif %}> <b>{{ l }}</b></label>{% endfor %}</div><label class="chute-toggle"><input type="checkbox" name="chute_{{ q.numero }}" value="1" {% if q.numero in chutes %}checked{% endif %}> 🎯 Marcar como chute</label></section>{% endfor %}</div><div class="nav"><button type="button" id="prev">← Anterior</button><button type="button" id="next">Próxima →</button><button type="submit" name="finalizar" value="1" class="finish">Finalizar prova</button></div></form></main><script src="{{ url_for('static', filename='app.js') }}"></script></body></html>
+<!doctype html>
+<html lang="pt-br">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ENEM Online</title><link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"></head>
+<body>
+<main class="exam">
+<header class="exam-header">
+  <div><strong>ENEM Online</strong><span class="muted"> — Caderno Azul</span></div>
+  <div class="header-progress">
+    <span id="progress">1 / {{ exam.questions|length }}</span>
+    <div class="progress-track"><div id="progressBar"></div></div>
+  </div>
+</header>
+
+<div class="exam-layout">
+  <aside class="question-map" id="questionMap">
+    <div class="map-head"><strong>Questões</strong><button type="button" id="closeMap" class="map-close">×</button></div>
+    <div class="map-legend"><span>✓ Respondida</span><span>🎯 Chute</span><span>— Vazia</span></div>
+    <div class="question-grid">
+      {% for q in exam.questions %}
+      <button type="button" class="question-number" data-go="{{ loop.index0 }}" data-num="{{ q.numero }}">
+        <span>{{ '%02d'|format(q.numero) }}</span><small>—</small>
+      </button>
+      {% endfor %}
+    </div>
+  </aside>
+
+  <section class="exam-content">
+    <div class="mobile-map-row"><button type="button" id="openMap" class="map-toggle">☰ Questões</button></div>
+
+    <div class="jump-row">
+      <button type="button" id="jumpButton" class="jump-button">Questão <strong id="currentNum">01</strong> / {{ exam.questions|length }} ▾</button>
+    </div>
+    <div id="jumpPanel" class="jump-panel" hidden>
+      <label for="jumpInput">Ir diretamente para:</label>
+      <div class="jump-controls"><input id="jumpInput" type="number" min="1" max="{{ exam.questions|length }}" placeholder="Nº da questão"><button type="button" id="jumpGo">Ir</button></div>
+    </div>
+
+    <form action="{{ url_for('responder') }}" method="post" id="examForm">
+      <div id="questions">
+        {% for q in exam.questions %}
+        <section class="question" data-num="{{ q.numero }}">
+          <h2>Questão {{ '%02d'|format(q.numero) }}</h2>
+          <div class="question-img-wrap"><img class="question-img" src="{{ url_for('question_asset', filename=q.imagem) }}" alt="Questão {{ q.numero }}"></div>
+          <div class="choices">
+            {% for l in ['A','B','C','D','E'] %}
+            <label><input type="radio" name="q{{ q.numero }}" value="{{ l }}" {% if answers.get(q.numero|string)==l %}checked{% endif %}> <b>{{ l }}</b></label>
+            {% endfor %}
+          </div>
+          <label class="chute-toggle"><input type="checkbox" name="chute_{{ q.numero }}" value="1" {% if q.numero in chutes %}checked{% endif %}> 🎯 Marcar como chute</label>
+        </section>
+        {% endfor %}
+      </div>
+      <div class="nav">
+        <button type="button" id="prev">← Anterior</button>
+        <button type="button" id="next">Próxima →</button>
+        <button type="submit" name="finalizar" value="1" class="finish">Finalizar prova</button>
+      </div>
+    </form>
+  </section>
+</div>
+</main>
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+</body></html>
