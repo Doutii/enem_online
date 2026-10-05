@@ -3,7 +3,7 @@
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>ENEM Online</title><link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"></head>
 <body>
-<main class="exam">
+<main class="exam" data-current-question="{{ current_question }}" data-remaining="{{ remaining }}">
 <header class="exam-header">
   <div><strong>ENEM Online</strong><span class="muted"> — Caderno Azul</span></div>
   <div class="header-progress"><div class="timer" id="timer">05:30:00</div><span id="progress">1 / {{ exam.questions|length }}</span><div class="progress-track"><div id="progressBar"></div></div></div>
