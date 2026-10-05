@@ -12,3 +12,13 @@
 @media(max-width:650px){.home-head{flex-direction:column}.home-head .button{width:100%}.result-links{width:100%}.result-links .button{flex:1}}
 
 .inline-form{display:inline-flex;margin:0}.inline-form .button{border:0;cursor:pointer;font:inherit}
+
+/* HEADER FINAL - 2026-10-05 */
+.exam-header{position:sticky!important;top:0!important;z-index:100!important;height:72px!important;min-height:72px!important;padding:10px 22px!important;margin:0 -22px 18px!important;background:#fff!important;display:flex!important;align-items:center!important;justify-content:center!important}
+.exam-header .header-left{position:absolute!important;left:22px!important;top:10px!important;height:52px!important;display:flex!important;align-items:center!important;gap:12px!important}
+.exam-header .timer-stack{display:flex!important;flex-direction:column!important;align-items:center!important;justify-content:center!important;gap:3px!important;min-width:92px!important}
+.exam-header .header-brand{position:static!important;transform:none!important;white-space:nowrap!important;text-align:center!important}
+.exam-header .pause-button{display:inline-flex!important;align-items:center!important;justify-content:center!important;visibility:visible!important;opacity:1!important;position:static!important;width:auto!important;height:40px!important;margin:0!important;padding:8px 14px!important;background:#667085!important;color:#fff!important;border:0!important;border-radius:10px!important;font:700 14px Inter,Segoe UI,Arial,sans-serif!important;cursor:pointer!important}
+.exam-header .pause-button:hover{background:#475467!important}
+.exam-header .header-spacer{display:none!important}
+@media(max-width:650px){.exam-header{height:68px!important;min-height:68px!important;padding:8px 12px!important;margin-left:-12px!important;margin-right:-12px!important}.exam-header .header-left{left:12px!important;top:8px!important;gap:8px!important}.exam-header .header-brand{display:none!important}.exam-header .timer-stack{min-width:82px!important}.exam-header .pause-button{height:36px!important;padding:7px 10px!important;font-size:12px!important}}
