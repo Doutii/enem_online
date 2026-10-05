@@ -196,7 +196,7 @@ def make_wrong_pdf(prova_path, question_records, selected_numbers, output_path):
 
 @app.route('/')
 def index():
-    cards=[{'id':sid,'title':e.get('title','ENEM — Caderno Azul'),'answered':len(e.get('answers',{})),'total':len(e.get('questions',[])),'completed':e.get('completed',False),'updated_at':e.get('updated_at',0)} for sid,e in EXAMS.items()]
+    cards=[{'id':sid,'title':e.get('title','ENEM — Caderno Azul'),'answered':len(e.get('answers',{})),'total':len(e.get('questions',[])),'completed':e.get('completed',False),'paused':e.get('paused',False),'updated_at':e.get('updated_at',0)} for sid,e in EXAMS.items()]
     cards.sort(key=lambda x:x['updated_at'],reverse=True)
     return render_template('index.html',saved_exams=cards)
 
