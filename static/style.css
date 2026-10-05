@@ -10,3 +10,5 @@
 
 .home-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}.home-head h1{margin-bottom:6px}.result-links{display:flex;gap:8px;flex-wrap:wrap}.study-note{padding:16px;border:1px solid #d8e0ea;background:#f5f8fb;border-radius:14px;margin:18px 0}.study-note p{margin:8px 0 0;color:#667085;line-height:1.55}.empty-state{padding:28px;text-align:center;border:1px dashed #cbd5e1;border-radius:14px;color:#667085;background:#fafbfc}
 @media(max-width:650px){.home-head{flex-direction:column}.home-head .button{width:100%}.result-links{width:100%}.result-links .button{flex:1}}
+
+.inline-form{display:inline-flex;margin:0}.inline-form .button{border:0;cursor:pointer;font:inherit}
