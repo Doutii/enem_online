@@ -48,9 +48,11 @@ function show(n,instant=false){
   i=Math.max(0,Math.min(qs.length-1,n));
   qs.forEach((q,j)=>q.classList.toggle('active',j===i));
   nums.forEach((b,j)=>b.classList.toggle('current',j===i));
-  const progress=document.getElementById('progress'),bar=document.getElementById('progressBar');
+  const progress=document.getElementById('progress');
   if(progress) progress.textContent=i+1+' / '+qs.length;
-  if(bar) bar.style.width=((i+1)/qs.length)*100+'%';
+  const finish=document.querySelector('.finish');
+  const allAnswered=qs.every(q=>!!q.querySelector('input[name="q'+q.dataset.num+'"]:checked'));
+  if(finish) finish.hidden=!allAnswered;
   const prev=document.getElementById('prev'),next=document.getElementById('next');
   if(prev) prev.disabled=i===0;
   if(next) next.disabled=i===qs.length-1;
@@ -83,7 +85,7 @@ nums.forEach((b,j)=>b.addEventListener('click',()=>show(j)));
 document.getElementById('openMap')?.addEventListener('click',()=>document.getElementById('questionMap')?.classList.add('open'));
 document.getElementById('closeMap')?.addEventListener('click',()=>document.getElementById('questionMap')?.classList.remove('open'));
 
-document.querySelectorAll('#questions input').forEach(el=>el.addEventListener('change',()=>{updateMap();scheduleSave();}));
+document.querySelectorAll('#questions input').forEach(el=>el.addEventListener('change',()=>{updateMap();show(i,true);}));
 
 form?.addEventListener('submit',e=>{
   const unanswered=qs.filter(q=>!q.querySelector('input[name="q'+q.dataset.num+'"]:checked')).length;
