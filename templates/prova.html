@@ -10,7 +10,9 @@
       <div class="timer" id="timer" style="margin:0;">05:30:00</div>
       <span id="progress" style="font-size:13px;font-weight:800;color:#475467;line-height:1.1;white-space:nowrap;">1 / {{ exam.questions|length }}</span>
     </div>
-    <button type="submit" form="pauseForm" id="pauseButton" style="display:inline-flex;visibility:visible;opacity:1;width:auto;height:40px;margin:0;padding:8px 14px;background:#667085;color:#fff;border:0;border-radius:10px;font:700 14px Arial,sans-serif;cursor:pointer;white-space:nowrap;">⏸ Pausar</button>
+    <form action="{{ url_for('pausar') }}" method="post" id="pauseForm" style="display:block!important;margin:0!important;padding:0!important;width:auto!important;">
+      <button type="submit" id="pauseButton" style="display:inline-flex!important;visibility:visible!important;opacity:1!important;width:auto!important;height:40px!important;margin:0!important;padding:8px 14px!important;background:#667085!important;color:#fff!important;border:0!important;border-radius:10px!important;font:700 14px Arial,sans-serif!important;cursor:pointer!important;white-space:nowrap!important;">⏸ Pausar</button>
+    </form>
   </div>
   <div style="white-space:nowrap;text-align:center;"><strong style="font-size:18px;">ENEM Online</strong><span class="muted"> — Caderno Azul</span></div>
 </header>
