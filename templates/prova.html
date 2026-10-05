@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="pt-br">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ENEM Online</title><link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"></head>
+<title>ENEM Online</title><link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=20261005-3"></head>
 <body>
 <main class="exam" data-current-question="{{ current_question }}" data-remaining="{{ remaining }}" data-paused="{{ 1 if paused else 0 }}">
 <header class="exam-header">
@@ -10,10 +10,9 @@
       <div class="timer" id="timer">05:30:00</div>
       <span id="progress">1 / {{ exam.questions|length }}</span>
     </div>
-    <button type="submit" form="pauseForm" class="pause-button">⏸ Pausar</button>
+    <button type="button" class="pause-button" id="pauseButton">⏸ Pausar</button>
   </div>
   <div class="header-brand"><strong>ENEM Online</strong><span class="muted"> — Caderno Azul</span></div>
-  <div class="header-spacer"></div>
 </header>
 
 <div class="exam-layout">
