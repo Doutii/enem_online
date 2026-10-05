@@ -8,3 +8,5 @@ generated/*
 .vscode/
 .DS_Store
 Thumbs.db
+data/
+
