@@ -5,8 +5,14 @@
 <body>
 <main class="exam" data-current-question="{{ current_question }}" data-remaining="{{ remaining }}" data-paused="{{ 1 if paused else 0 }}">
 <header class="exam-header">
-  <div><strong>ENEM Online</strong><span class="muted"> — Caderno Azul</span></div>
-  <div class="header-actions"><span id="progress">1 / {{ exam.questions|length }}</span><div class="timer" id="timer">05:30:00</div><button type="submit" form="pauseForm" class="pause-button">⏸ Pausar prova</button></div>
+  <div class="header-left">
+    <div class="timer-stack">
+      <div class="timer" id="timer">05:30:00</div>
+      <span id="progress">1 / {{ exam.questions|length }}</span>
+    </div>
+    <button type="submit" form="pauseForm" class="pause-button">⏸ Pausar prova</button>
+  </div>
+  <div class="header-brand"><strong>ENEM Online</strong><span class="muted"> — Caderno Azul</span></div>
 </header>
 
 <div class="exam-layout">
