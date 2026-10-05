@@ -1,20 +1,18 @@
 <!doctype html>
 <html lang="pt-br">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ENEM Online</title><link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=20261005-3"></head>
+<title>ENEM Online</title><link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=20261005-4"></head>
 <body>
 <main class="exam" data-current-question="{{ current_question }}" data-remaining="{{ remaining }}" data-paused="{{ 1 if paused else 0 }}">
-<header class="exam-header">
-  <div class="exam-header-left" style="position:absolute;left:22px;top:10px;display:flex;align-items:center;gap:12px;height:52px;">
-    <div class="timer-stack" style="display:flex;flex-direction:column;align-items:center;gap:3px;min-width:92px;">
-      <div class="timer" id="timer">05:30:00</div>
-      <span id="progress">1 / {{ exam.questions|length }}</span>
+<header class="exam-header" style="position:sticky;top:0;z-index:9999;height:72px;min-height:72px;margin:0 -22px 18px;padding:10px 22px;background:#fff;border-bottom:1px solid #e3e7ed;display:flex;align-items:center;justify-content:center;">
+  <div style="position:absolute;left:22px;top:10px;height:52px;display:flex;align-items:center;gap:12px;">
+    <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;min-width:92px;">
+      <div class="timer" id="timer" style="margin:0;">05:30:00</div>
+      <span id="progress" style="font-size:13px;font-weight:800;color:#475467;line-height:1.1;white-space:nowrap;">1 / {{ exam.questions|length }}</span>
     </div>
-    <form action="{{ url_for('pausar') }}" method="post" id="pauseForm" style="display:block!important;margin:0!important;padding:0!important;width:auto!important;">
-      <button type="submit" id="pauseButton" style="display:inline-flex!important;visibility:visible!important;opacity:1!important;width:auto!important;height:40px!important;margin:0!important;padding:8px 14px!important;background:#667085!important;color:#fff!important;border:0!important;border-radius:10px!important;font:700 14px Inter,Segoe UI,Arial,sans-serif!important;cursor:pointer!important;white-space:nowrap!important;">⏸ Pausar</button>
-    </form>
+    <button type="submit" form="pauseForm" id="pauseButton" style="display:inline-flex;visibility:visible;opacity:1;width:auto;height:40px;margin:0;padding:8px 14px;background:#667085;color:#fff;border:0;border-radius:10px;font:700 14px Arial,sans-serif;cursor:pointer;white-space:nowrap;">⏸ Pausar</button>
   </div>
-  <div class="header-brand" style="white-space:nowrap;text-align:center;"><strong>ENEM Online</strong><span class="muted"> — Caderno Azul</span></div>
+  <div style="white-space:nowrap;text-align:center;"><strong style="font-size:18px;">ENEM Online</strong><span class="muted"> — Caderno Azul</span></div>
 </header>
 
 <div class="exam-layout">
