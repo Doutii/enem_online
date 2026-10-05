@@ -230,6 +230,20 @@ def importar():
     save_catalog(); session['exam_id']=sid
     return redirect(url_for('prova'))
 
+@app.route('/refazer/<sid>', methods=['POST'])
+def refazer(sid):
+    exam=EXAMS.get(sid)
+    if not exam: return redirect(url_for('index'))
+    exam['answers']={}
+    exam['chutes']=set()
+    exam['current_question']=0
+    exam['started_at']=time.time()
+    exam['completed']=False
+    exam['updated_at']=time.time()
+    save_catalog()
+    session['exam_id']=sid
+    return redirect(url_for('prova'))
+
 @app.route('/abrir/<sid>')
 def abrir(sid):
     if sid not in EXAMS: return redirect(url_for('index'))
