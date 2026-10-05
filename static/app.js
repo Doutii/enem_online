@@ -40,26 +40,6 @@ document.querySelectorAll('#questions input').forEach(el=>{
   el.addEventListener('change',updateMap);
 });
 
-const jumpButton=document.getElementById('jumpButton');
-const jumpPanel=document.getElementById('jumpPanel');
-const jumpInput=document.getElementById('jumpInput');
-const jumpGo=document.getElementById('jumpGo');
-
-jumpButton?.addEventListener('click',()=>{
-  jumpPanel.hidden=!jumpPanel.hidden;
-  if(!jumpPanel.hidden){jumpInput.focus();jumpInput.select();}
-});
-
-function jump(){
-  const n=parseInt(jumpInput.value,10);
-  if(Number.isNaN(n)||n<1||n>qs.length)return;
-  show(n-1);
-  jumpPanel.hidden=true;
-  jumpInput.value='';
-}
-jumpGo?.addEventListener('click',jump);
-jumpInput?.addEventListener('keydown',e=>{if(e.key==='Enter')jump();});
-
 const map=document.getElementById('questionMap');
 document.getElementById('openMap')?.addEventListener('click',()=>map.classList.add('open'));
 document.getElementById('closeMap')?.addEventListener('click',()=>map.classList.remove('open'));
