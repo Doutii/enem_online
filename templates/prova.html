@@ -6,10 +6,7 @@
 <main class="exam">
 <header class="exam-header">
   <div><strong>ENEM Online</strong><span class="muted"> — Caderno Azul</span></div>
-  <div class="header-progress">
-    <span id="progress">1 / {{ exam.questions|length }}</span>
-    <div class="progress-track"><div id="progressBar"></div></div>
-  </div>
+  <div class="header-progress"><div class="timer" id="timer">05:30:00</div><span id="progress">1 / {{ exam.questions|length }}</span><div class="progress-track"><div id="progressBar"></div></div></div>
 </header>
 
 <div class="exam-layout">
