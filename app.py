@@ -41,7 +41,6 @@ def column_bounds(page, x0):
 def render_question_image(doc, page_idx, block, out_dir):
     page=doc[page_idx]
     left,right=column_bounds(page, block['x0'])
-    # Find next question in same column. Otherwise use near page bottom.
     same_left = block['x0'] < page.rect.width/2
     candidates=[b for b in find_question_blocks(page) if (b['x0'] < page.rect.width/2) == same_left and b['y0'] > block['y0']+2]
     if candidates:
@@ -60,13 +59,10 @@ def parse_gabarito(path):
     doc=fitz.open(path)
     text='\n'.join(p.get_text() for p in doc)
     answers={}
-    # 46-90 straightforward
     for n, ans in re.findall(r'(?m)^\s*(4[6-9]|[5-8]\d|90)\s+([A-E])\s*$', text):
         answers[int(n)]={'ingles':ans,'espanhol':ans}
-    # 1-5 line has two columns: 1 C C ...
     for n,a,b in re.findall(r'(?m)^\s*([1-5])\s+([A-E])\s+([A-E])\s*$', text):
         answers[int(n)]={'ingles':a,'espanhol':b}
-    # 6-45 single column
     for n, ans in re.findall(r'(?m)^\s*((?:[6-9]|[1-3]\d|4[0-5]))\s+([A-E])\s*$', text):
         answers[int(n)]={'ingles':ans,'espanhol':ans}
     return answers
@@ -82,12 +78,9 @@ def parse_prova(path, gabarito_path, language='ingles'):
         page=doc[pi]
         for block in find_question_blocks(page):
             n=block['n']
-            # Skip the alternate language version that is not selected.
             if 1 <= n <= 5:
-                # Page 2-3 = English, page 3-4 = Spanish. Detect by x position and page.
                 is_english = pi in (1,2) and not (pi==2 and block['x0']>doc[pi].rect.width/2)
                 is_spanish = (pi in (2,3) and block['x0']>=doc[pi].rect.width/2) or (pi==3 and block['x0']<doc[pi].rect.width/2)
-                # More reliable mapping for this official layout: English Q1-3 p2, Q4-5 p3 left; Spanish Q1 p3 right, Q2-5 p4.
                 if language=='ingles' and not ((n in (1,2,3) and pi==1) or (n in (4,5) and pi==2 and block['x0']<doc[pi].rect.width/2)):
                     continue
                 if language=='espanhol' and not ((n==1 and pi==2 and block['x0']>doc[pi].rect.width/2) or (n in (2,3,4,5) and pi==3)):
@@ -100,15 +93,12 @@ def parse_prova(path, gabarito_path, language='ingles'):
             questions.append({'numero':n,'imagem':image,'resposta':answers[n][language]})
             seen.add(n)
     questions.sort(key=lambda q:q['numero'])
-    # Validate expected 90 objective questions (language choice still counts once for 1-5).
     return questions, out_dir
 
-def make_wrong_pdf(prova_path, question_records, wrong_numbers, output_path):
-    src=fitz.open(prova_path)
+def make_wrong_pdf(prova_path, question_records, selected_numbers, output_path):
     out=fitz.open()
-    # Recreate a clean study PDF from the rendered snippets. This avoids carrying unrelated questions.
     for q in question_records:
-        if q['numero'] not in wrong_numbers:
+        if q['numero'] not in selected_numbers:
             continue
         img_path=os.path.join(q['asset_dir'], q['imagem'])
         page=out.new_page(width=595, height=842)
@@ -141,7 +131,15 @@ def importar():
     if len(questions) != 90:
         flash(f'Importação parcial: foram identificadas {len(questions)} questões. Verifique se o PDF é o Caderno Azul do 1º dia e o gabarito correspondente.')
     for q in questions: q['asset_dir']=asset_dir
-    EXAMS[sid]={'prova':ppath,'gabarito':gpath,'language':language,'questions':questions,'asset_dir':asset_dir,'answers':{}}
+    EXAMS[sid]={
+        'prova':ppath,
+        'gabarito':gpath,
+        'language':language,
+        'questions':questions,
+        'asset_dir':asset_dir,
+        'answers':{},
+        'chutes':set()
+    }
     session['exam_id']=sid
     return redirect(url_for('prova'))
 
@@ -149,45 +147,108 @@ def importar():
 def prova():
     exam=EXAMS.get(session.get('exam_id'))
     if not exam: return redirect(url_for('index'))
-    return render_template('prova.html', exam=exam, answers=exam.get('answers',{}))
+    return render_template(
+        'prova.html',
+        exam=exam,
+        answers=exam.get('answers',{}),
+        chutes=exam.get('chutes',set())
+    )
 
 @app.route('/responder', methods=['POST'])
 def responder():
     exam=EXAMS.get(session.get('exam_id'))
     if not exam: return redirect(url_for('index'))
     answers=exam.get('answers',{})
+    chutes=exam.get('chutes',set())
+
     for q in exam['questions']:
-        v=request.form.get(f"q{q['numero']}")
-        if v: answers[str(q['numero'])]=v
+        number=str(q['numero'])
+        v=request.form.get(f"q{number}")
+        if v:
+            answers[number]=v
+        if request.form.get(f"chute_{number}") == '1':
+            chutes.add(int(number))
+        else:
+            chutes.discard(int(number))
+
     exam['answers']=answers
+    exam['chutes']=chutes
+
     if request.form.get('finalizar'):
         return redirect(url_for('resultado'))
     return redirect(url_for('prova'))
 
 @app.route('/resultado')
 def resultado():
-    exam=EXAMS.get(session.get('exam_id')); answers=(exam or {}).get('answers',{})
+    exam=EXAMS.get(session.get('exam_id'))
     if not exam: return redirect(url_for('index'))
-    rows=[]; wrong=[]; correct=0
+
+    answers=exam.get('answers',{})
+    chutes=exam.get('chutes',set())
+    rows=[]
+    wrong=[]
+    correct=0
+    chute_count=0
+    chute_correct=0
+    chute_wrong=0
+
     for q in exam['questions']:
-        user=answers.get(str(q['numero']))
+        number=q['numero']
+        user=answers.get(str(number))
         ok=user == q['resposta']
-        if ok: correct+=1
-        else: wrong.append(q['numero'])
-        rows.append({'numero':q['numero'],'user':user or '—','correct':q['resposta'],'ok':ok})
-    return render_template('resultado.html', total=len(rows), correct=correct, wrong=len(rows)-correct, rows=rows, exam=exam)
+        is_chute=number in chutes
+
+        if ok:
+            correct+=1
+        else:
+            wrong.append(number)
+
+        if is_chute:
+            chute_count+=1
+            if ok:
+                chute_correct+=1
+            else:
+                chute_wrong+=1
+
+        rows.append({
+            'numero':number,
+            'user':user or '—',
+            'correct':q['resposta'],
+            'ok':ok,
+            'chute':is_chute
+        })
+
+    return render_template(
+        'resultado.html',
+        total=len(rows),
+        correct=correct,
+        wrong=len(rows)-correct,
+        chute_count=chute_count,
+        chute_correct=chute_correct,
+        chute_wrong=chute_wrong,
+        rows=rows,
+        exam=exam
+    )
 
 @app.route('/baixar-erros')
 def baixar_erros():
-    exam=EXAMS.get(session.get('exam_id')); answers=(exam or {}).get('answers',{})
+    exam=EXAMS.get(session.get('exam_id'))
     if not exam: return redirect(url_for('index'))
-    wrong=[]
+
+    answers=exam.get('answers',{})
+    chutes=exam.get('chutes',set())
+
+    # O PDF de estudo reúne toda questão errada + toda questão marcada como chute,
+    # inclusive chutes que por acaso tenham sido acertados.
+    selected=set()
     for q in exam['questions']:
-        if answers.get(str(q['numero'])) != q['resposta']:
-            wrong.append(q['numero'])
-    output=os.path.join(GENERATED, f"ENEM_questoes_erradas_{uuid.uuid4().hex[:8]}.pdf")
-    make_wrong_pdf(exam['prova'], exam['questions'], wrong, output)
-    return send_file(output, as_attachment=True, download_name='ENEM_questoes_erradas.pdf')
+        number=q['numero']
+        if answers.get(str(number)) != q['resposta'] or number in chutes:
+            selected.add(number)
+
+    output=os.path.join(GENERATED, f"ENEM_questoes_revisao_{uuid.uuid4().hex[:8]}.pdf")
+    make_wrong_pdf(exam['prova'], exam['questions'], selected, output)
+    return send_file(output, as_attachment=True, download_name='ENEM_questoes_revisao.pdf')
 
 @app.route('/static/question/<path:filename>')
 def question_asset(filename):
