@@ -111,7 +111,7 @@ setInterval(saveState,10000);
 document.getElementById('pauseForm')?.addEventListener('submit',async e=>{
   e.preventDefault();
   const button=document.getElementById('pauseButton');
-  if(button) button.disabled=true;
+  if(button) { button.disabled=true; button.textContent='⏸ Pausando...'; }
   await saveState();
   e.currentTarget.submit();
 });
