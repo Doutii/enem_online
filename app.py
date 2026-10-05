@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, send_file, session, flash
+from flask import Flask, render_template, request, redirect, url_for, send_file, session, flash, jsonify
 import fitz
 import os, re, json, uuid, time, hashlib
 from werkzeug.utils import secure_filename
@@ -14,7 +14,7 @@ os.makedirs(GENERATED, exist_ok=True)
 os.makedirs(DATA, exist_ok=True)
 
 app = Flask(__name__)
-app.secret_key = 'enem-online-local-change-me'
+app.secret_key = os.environ.get('SECRET_KEY', 'enem-online-local-change-me')
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024
 EXAMS = {}
 
@@ -40,7 +40,53 @@ def load_exams():
     except (OSError,json.JSONDecodeError): return
     for sid,e in data.items():
         if os.path.exists(e.get('prova','')) and os.path.exists(e.get('gabarito','')) and os.path.isdir(e.get('asset_dir','')):
-            e['chutes']=set(e.get('chutes',[])); e.setdefault('answers',{}); e.setdefault('current_question',0); e.setdefault('started_at',None); e.setdefault('completed',False); e.setdefault('updated_at',0); EXAMS[sid]=e
+            e['chutes']=set(e.get('chutes',[])); e.setdefault('answers',{}); e.setdefault('current_question',0); e.setdefault('started_at',None); e.setdefault('completed',False); e.setdefault('updated_at',0); e.setdefault('history',[]); EXAMS[sid]=e
+
+
+def area_for_question(numero):
+    return 'Linguagens' if int(numero) <= 45 else 'Ciências Humanas'
+
+def build_result(exam):
+    answers=exam.get('answers',{})
+    chutes=exam.get('chutes',set())
+    rows=[]
+    for q in exam['questions']:
+        n=q['numero']
+        user=answers.get(str(n))
+        ok=user==q['resposta']
+        rows.append({'numero':n,'user':user or '—','correct':q['resposta'],'ok':ok,'chute':n in chutes,'area':area_for_question(n)})
+    return rows
+
+def record_history(exam):
+    rows=build_result(exam)
+    correct=sum(r['ok'] for r in rows)
+    chutes=sum(r['chute'] for r in rows)
+    record={
+        'timestamp':time.time(),
+        'correct':correct,
+        'wrong':len(rows)-correct,
+        'total':len(rows),
+        'percent':round(correct*100/len(rows),1) if rows else 0,
+        'chutes':chutes,
+        'areas':{
+            'Linguagens': {'correct':sum(r['ok'] for r in rows if r['area']=='Linguagens'),'total':sum(1 for r in rows if r['area']=='Linguagens')},
+            'Ciências Humanas': {'correct':sum(r['ok'] for r in rows if r['area']=='Ciências Humanas'),'total':sum(1 for r in rows if r['area']=='Ciências Humanas')}
+        }
+    }
+    exam.setdefault('history',[]).append(record)
+    return record
+
+def study_summary(exam):
+    rows=build_result(exam)
+    grouped={}
+    for r in rows:
+        if not r['ok'] or r['chute']:
+            area=r['area']
+            grouped.setdefault(area,{'wrong':0,'chutes':0,'questions':[]})
+            if not r['ok']: grouped[area]['wrong']+=1
+            if r['chute']: grouped[area]['chutes']+=1
+            grouped[area]['questions'].append(r['numero'])
+    return grouped
 
 def remaining_seconds(exam):
     if not exam.get('started_at'): return DURATION_SECONDS
@@ -175,7 +221,7 @@ def importar():
     except OSError: pass
     for q in questions: q['asset_dir']=asset_dir
     if len(questions)!=90: flash(f'Importação parcial: foram identificadas {len(questions)} questões. Verifique os PDFs correspondentes.')
-    EXAMS[sid]={'prova':ppath,'gabarito':gpath,'language':language,'title':'ENEM — Caderno Azul','questions':questions,'asset_dir':asset_dir,'answers':{},'chutes':set(),'current_question':0,'started_at':time.time(),'completed':False,'updated_at':time.time()}
+    EXAMS[sid]={'prova':ppath,'gabarito':gpath,'language':language,'title':'ENEM — Caderno Azul','questions':questions,'asset_dir':asset_dir,'answers':{},'chutes':set(),'current_question':0,'started_at':time.time(),'completed':False,'updated_at':time.time(),'history':[]}
     save_catalog(); session['exam_id']=sid
     return redirect(url_for('prova'))
 
@@ -215,7 +261,10 @@ def responder():
         if request.form.get('chute_'+n)=='1': chutes.add(int(n))
         else: chutes.discard(int(n))
     exam['answers']=answers; exam['chutes']=chutes; exam['updated_at']=time.time()
-    if request.form.get('finalizar') or remaining_seconds(exam)<=0: exam['completed']=True
+    should_finish=bool(request.form.get('finalizar') or remaining_seconds(exam)<=0)
+    if should_finish and not exam.get('completed'):
+        exam['completed']=True
+        record_history(exam)
     save_catalog()
     return redirect(url_for('resultado' if exam.get('completed') else 'prova'))
 
@@ -223,17 +272,35 @@ def responder():
 def resultado():
     exam=EXAMS.get(session.get('exam_id'))
     if not exam: return redirect(url_for('index'))
-    answers=exam.get('answers',{}); chutes=exam.get('chutes',set()); rows=[]; correct=chute_count=chute_correct=chute_wrong=0
-    for q in exam['questions']:
-        n=q['numero']; user=answers.get(str(n)); ok=user==q['resposta']; is_chute=n in chutes
-        correct+=int(ok)
-        if is_chute: chute_count+=1; chute_correct+=int(ok); chute_wrong+=int(not ok)
-        rows.append({'numero':n,'user':user or '—','correct':q['resposta'],'ok':ok,'chute':is_chute})
+    rows=build_result(exam)
+    correct=sum(r['ok'] for r in rows)
+    chutes=[r for r in rows if r['chute']]
     area_stats=[]
-    for name,a,b in [('Linguagens',1,45),('Ciências Humanas',46,90)]:
-        sub=[r for r in rows if a<=r['numero']<=b]; ac=sum(r['ok'] for r in sub)
+    for name in ['Linguagens','Ciências Humanas']:
+        sub=[r for r in rows if r['area']==name]
+        ac=sum(r['ok'] for r in sub)
         area_stats.append({'name':name,'correct':ac,'total':len(sub),'percent':ac*100/len(sub) if sub else 0})
-    return render_template('resultado.html',total=len(rows),correct=correct,wrong=len(rows)-correct,chute_count=chute_count,chute_correct=chute_correct,chute_wrong=chute_wrong,rows=rows,exam=exam,area_stats=area_stats)
+    return render_template('resultado.html',total=len(rows),correct=correct,wrong=len(rows)-correct,
+                           chute_count=len(chutes),chute_correct=sum(r['ok'] for r in chutes),
+                           chute_wrong=sum(not r['ok'] for r in chutes),rows=rows,exam=exam,
+                           area_stats=area_stats,history=exam.get('history',[]))
+
+@app.route('/historico')
+def historico():
+    entries=[]
+    for sid,exam in EXAMS.items():
+        for h in exam.get('history',[]):
+            item=dict(h); item['exam_id']=sid; item['title']=exam.get('title','ENEM'); entries.append(item)
+    entries.sort(key=lambda x:x.get('timestamp',0),reverse=True)
+    avg=sum(x['percent'] for x in entries)/len(entries) if entries else 0
+    best=max((x['percent'] for x in entries),default=0)
+    return render_template('historico.html',entries=entries,total_attempts=len(entries),avg=avg,best=best)
+
+@app.route('/estudo')
+def estudo():
+    exam=EXAMS.get(session.get('exam_id'))
+    if not exam: return redirect(url_for('index'))
+    return render_template('estudo.html',exam=exam,summary=study_summary(exam),focus=[r for r in build_result(exam) if not r['ok'] or r['chute']])
 
 @app.route('/baixar-erros')
 def baixar_erros():
@@ -253,4 +320,4 @@ def question_asset(filename):
     return send_file(path) if os.path.isfile(path) else ('',404)
 
 if __name__=='__main__':
-    app.run(debug=True, host='127.0.0.1', port=5000)
+    app.run(debug=os.environ.get('FLASK_DEBUG','0')=='1', host=os.environ.get('HOST','127.0.0.1'), port=int(os.environ.get('PORT','5000')))
