@@ -5,14 +5,16 @@
 <body>
 <main class="exam" data-current-question="{{ current_question }}" data-remaining="{{ remaining }}" data-paused="{{ 1 if paused else 0 }}">
 <header class="exam-header">
-  <div class="header-left">
-    <div class="timer-stack">
+  <div class="exam-header-left" style="position:absolute;left:22px;top:10px;display:flex;align-items:center;gap:12px;height:52px;">
+    <div class="timer-stack" style="display:flex;flex-direction:column;align-items:center;gap:3px;min-width:92px;">
       <div class="timer" id="timer">05:30:00</div>
       <span id="progress">1 / {{ exam.questions|length }}</span>
     </div>
-    <button type="button" class="pause-button" id="pauseButton">⏸ Pausar</button>
+    <form action="{{ url_for('pausar') }}" method="post" id="pauseForm" style="display:block!important;margin:0!important;padding:0!important;width:auto!important;">
+      <button type="submit" id="pauseButton" style="display:inline-flex!important;visibility:visible!important;opacity:1!important;width:auto!important;height:40px!important;margin:0!important;padding:8px 14px!important;background:#667085!important;color:#fff!important;border:0!important;border-radius:10px!important;font:700 14px Inter,Segoe UI,Arial,sans-serif!important;cursor:pointer!important;white-space:nowrap!important;">⏸ Pausar</button>
+    </form>
   </div>
-  <div class="header-brand"><strong>ENEM Online</strong><span class="muted"> — Caderno Azul</span></div>
+  <div class="header-brand" style="white-space:nowrap;text-align:center;"><strong>ENEM Online</strong><span class="muted"> — Caderno Azul</span></div>
 </header>
 
 <div class="exam-layout">
@@ -52,7 +54,6 @@
         <button type="submit" name="finalizar" value="1" class="finish">Finalizar prova</button>
       </div>
     </form>
-    <form action="{{ url_for('pausar') }}" method="post" id="pauseForm" class="pause-form"></form>
   </section>
 </div>
 </main>
