@@ -43,6 +43,11 @@ def load_exams():
             e['chutes']=set(e.get('chutes',[])); e.setdefault('answers',{}); e.setdefault('current_question',0); e.setdefault('started_at',None); e.setdefault('completed',False); e.setdefault('updated_at',0); e.setdefault('history',[]); EXAMS[sid]=e
 
 
+def timestamp_br(value):
+    if not value: return '—'
+    return time.strftime('%d/%m/%Y %H:%M', time.localtime(float(value)))
+app.jinja_env.filters['timestamp_br']=timestamp_br
+
 def area_for_question(numero):
     return 'Linguagens' if int(numero) <= 45 else 'Ciências Humanas'
 
