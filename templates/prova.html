@@ -28,14 +28,6 @@
   <section class="exam-content">
     <div class="mobile-map-row"><button type="button" id="openMap" class="map-toggle">☰ Questões</button></div>
 
-    <div class="jump-row">
-      <button type="button" id="jumpButton" class="jump-button">Questão <strong id="currentNum">01</strong> / {{ exam.questions|length }} ▾</button>
-    </div>
-    <div id="jumpPanel" class="jump-panel" hidden>
-      <label for="jumpInput">Ir diretamente para:</label>
-      <div class="jump-controls"><input id="jumpInput" type="number" min="1" max="{{ exam.questions|length }}" placeholder="Nº da questão"><button type="button" id="jumpGo">Ir</button></div>
-    </div>
-
     <form action="{{ url_for('responder') }}" method="post" id="examForm">
       <div id="questions">
         {% for q in exam.questions %}
