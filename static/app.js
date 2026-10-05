@@ -4,6 +4,7 @@ const nums=[...document.querySelectorAll('.question-number')];
 const form=document.getElementById('examForm');
 let i=Number(examRoot?.dataset.currentQuestion ?? 0) || 0;
 let remaining=Number(examRoot?.dataset.remaining ?? 0) || 0;
+const isPaused=examRoot?.dataset.paused==='1';
 let saveTimer=null;
 
 function collectState(){
@@ -104,8 +105,16 @@ function tick(){
 show(i,true);
 updateMap();
 renderTimer();
-setInterval(tick,1000);
+if(!isPaused) setInterval(tick,1000);
 setInterval(saveState,10000);
+
+document.getElementById('pauseForm')?.addEventListener('submit',async e=>{
+  e.preventDefault();
+  const button=document.querySelector('.pause-button');
+  if(button) button.disabled=true;
+  await saveState();
+  e.currentTarget.submit();
+});
 
 window.addEventListener('beforeunload',()=>{
   try{
