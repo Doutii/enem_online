@@ -188,10 +188,11 @@ def parse_gabarito(path):
 
     return answers
 
-def parse_prova(path, gabarito_path, language='ingles', exam_type='humanas'):
+def parse_prova(path, gabarito_path, language='ingles', exam_type='humanas', out_dir=None):
     doc=fitz.open(path)
     answers=parse_gabarito(gabarito_path)
-    out_dir=os.path.join(GENERATED, uuid.uuid4().hex)
+    if out_dir is None:
+        out_dir=os.path.join(GENERATED, uuid.uuid4().hex)
     os.makedirs(out_dir, exist_ok=True)
     questions=[]
     seen=set()
@@ -212,10 +213,11 @@ def parse_prova(path, gabarito_path, language='ingles', exam_type='humanas'):
                     continue
             if n in seen:
                 continue
-            if n not in answers:
-                continue
+            # A imagem da questão é independente do reconhecimento do gabarito.
+            # Assim, um layout diferente no PDF do gabarito nunca deixa a prova vazia.
             image=render_question_image(doc, pi, block, out_dir)
-            questions.append({'numero':n,'imagem':image,'resposta':answers[n][language]})
+            answer_data=answers.get(n,{})
+            questions.append({'numero':n,'imagem':image,'resposta':answer_data.get(language)})
             seen.add(n)
     questions.sort(key=lambda q:q['numero'])
     return questions, out_dir
@@ -266,6 +268,62 @@ def importar():
     except OSError: pass
     for q in questions: q['asset_dir']=asset_dir
     if len(questions)!=90: flash(f'Importação parcial: foram identificadas {len(questions)} questões. Verifique os PDFs correspondentes.')
+    temp=uuid.uuid4().hex
+    ptmp=os.path.join(UPLOADS,temp+'_prova.pdf')
+    gtmp=os.path.join(UPLOADS,temp+'_gabarito.pdf')
+    prova.save(ptmp); gabarito.save(gtmp)
+
+    ph=file_sha256(ptmp); gh=file_sha256(gtmp)
+    sid=hashlib.sha256(f'{ph}:{gh}:{exam_type}:{language}'.encode()).hexdigest()[:24]
+
+    type_dir='humanas' if exam_type=='humanas' else 'exatas'
+    upload_dir=os.path.join(UPLOADS,type_dir)
+    asset_dir=os.path.join(GENERATED,type_dir,sid)
+    os.makedirs(upload_dir,exist_ok=True)
+    os.makedirs(asset_dir,exist_ok=True)
+
+    ppath=os.path.join(upload_dir,f'{sid}_prova.pdf')
+    gpath=os.path.join(upload_dir,f'{sid}_gabarito.pdf')
+
+    if os.path.exists(ppath): os.remove(ptmp)
+    else: os.replace(ptmp,ppath)
+    if os.path.exists(gpath): os.remove(gtmp)
+    else: os.replace(gtmp,gpath)
+
+    if sid in EXAMS:
+        session['exam_id']=sid
+        flash('Esta prova já está salva. Reabrindo a prova existente, sem duplicar imagens.')
+        return redirect(url_for('prova'))
+
+    try:
+        questions,tmp_dir=parse_prova(ppath,gpath,language,exam_type)
+    except Exception as e:
+        flash('Não foi possível interpretar os PDFs: '+str(e))
+        return redirect(url_for('index'))
+
+    for name in os.listdir(tmp_dir):
+        src=os.path.join(tmp_dir,name); dst=os.path.join(asset_dir,name)
+        if not os.path.exists(dst): os.replace(src,dst)
+    try: os.rmdir(tmp_dir)
+    except OSError: pass
+    for q in questions: q['asset_dir']=asset_dir
+
+    expected_start=1 if exam_type=='humanas' else 91
+    expected_end=90 if exam_type=='humanas' else 180
+    expected=set(range(expected_start,expected_end+1))
+    found={q['numero'] for q in questions}
+    missing=sorted(expected-found)
+
+    if not questions:
+        flash(f'Nenhuma questão foi encontrada no PDF. Para {type_dir}, o caderno precisa conter as questões {expected_start}–{expected_end}.')
+        return redirect(url_for('index'))
+    if missing:
+        preview=', '.join(map(str,missing[:12]))
+        suffix='...' if len(missing)>12 else ''
+        flash(f'Importação parcial: {len(questions)}/90 questões encontradas. Faltando: {preview}{suffix}. Verifique se o PDF é o caderno correto.')
+    else:
+        flash(f'Prova importada com sucesso: 90 questões. Imagens geradas em {type_dir}/{sid}.')
+
     EXAMS[sid]={'prova':ppath,'gabarito':gpath,'language':language,'exam_type':exam_type,'title':('ENEM — 1º Dia — Caderno Azul' if exam_type=='humanas' else 'ENEM — 2º Dia — Caderno Azul'),'questions':questions,'asset_dir':asset_dir,'answers':{},'chutes':set(),'current_question':0,'started_at':time.time(),'paused':False,'paused_remaining':DURATION_SECONDS,'completed':False,'updated_at':time.time(),'history':[]}
     save_catalog(); session['exam_id']=sid
     return redirect(url_for('prova'))
