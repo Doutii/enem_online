@@ -71,26 +71,23 @@ app.jinja_env.filters['timestamp_br']=timestamp_br
 def identify_exam_cover(path):
     """Tenta identificar ano, dia, caderno e cor pela capa/texto inicial do PDF."""
     doc=fitz.open(path)
-    first_text='\\n'.join(doc[i].get_text() for i in range(min(3,len(doc))))
+    first_text='\n'.join(doc[i].get_text() for i in range(min(3,len(doc))))
     doc.close()
     normalized=_norm_word(first_text)
-    year_match=re.search(r'\\b(20(?:0\\d|1\\d|2\\d))\\b',normalized)
+    year_match=re.search(r'\b(20(?:0\d|1\d|2\d))\b',normalized)
     year=year_match.group(1) if year_match else None
 
     day=None
-    if re.search(r'\\b2\\s*(?:O|º|°)?\\s*DIA\\b|SEGUNDO\\s+DIA',normalized):
+    if re.search(r'\b2\s*(?:O|º|°)?\s*DIA\b|SEGUNDO\s+DIA',normalized):
         day=2
-    elif re.search(r'\\b1\\s*(?:O|º|°)?\\s*DIA\\b|PRIMEIRO\\s+DIA',normalized):
+    elif re.search(r'\b1\s*(?:O|º|°)?\s*DIA\b|PRIMEIRO\s+DIA',normalized):
         day=1
 
-    booklet_match=re.search(r'\\bCADERNO\\s*(?:DE\\s*)?(\\d{1,2})\\b',normalized)
+    booklet_match=re.search(r'\bCADERNO\s*(?:DE\s*)?(\d{1,2})\b',normalized)
     booklet=booklet_match.group(1) if booklet_match else None
     colors=('AZUL','AMARELO','BRANCO','ROSA','VERDE','CINZA','LARANJA')
-    color=next((c.title() for c in colors if re.search(r'\\b'+c+r'\\b',normalized)),None)
+    color=next((c.title() for c in colors if re.search(r'\b'+c+r'\b',normalized)),None)
 
-    # Faixa de numeração é um fallback caso a capa não explicite o dia.
-    if day is None:
-        all_text=' '.join(doc.get_text() for doc in [])  # evita reabrir/alterar o PDF
     exam_type='exatas' if day==2 else 'humanas' if day==1 else None
     parts=[]
     if year: parts.append('ENEM '+year)
@@ -461,7 +458,7 @@ def importar():
         }
         save_catalog()
         session['exam_id']=sid
-        flash(f'Prova identificada: {EXAMS[sid][\'title\']}. Importação concluída com 90 questões.')
+        flash("Prova identificada: {}. Importação concluída com 90 questões.".format(EXAMS[sid]['title']))
         return redirect(url_for('prova'))
 
     except Exception as e:
