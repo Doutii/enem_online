@@ -1,6 +1,6 @@
 from flask import Flask, render_template, request, redirect, url_for, send_file, session, flash, jsonify
 import fitz
-import os, re, json, uuid, time, hashlib
+import os, re, json, uuid, time, hashlib, unicodedata
 from threading import Lock
 from werkzeug.utils import secure_filename
 
@@ -133,16 +133,47 @@ def clean_text(s):
     s = re.sub(r'\s+', ' ', s or '').strip()
     return s
 
+def _norm_word(value):
+    value=unicodedata.normalize('NFKD', value or '')
+    return ''.join(ch for ch in value if not unicodedata.combining(ch)).upper()
+
 def find_question_blocks(page):
-    """Return question heading blocks with x/y coordinates, preserving two-column layout."""
+    """Localiza QUESTÃO + número usando as palavras do PDF, sem depender de blocos."""
+    words=page.get_text('words', sort=True)
     out=[]
-    for b in page.get_text('blocks'):
-        txt=b[4].strip()
-        m=re.search(r'QUESTÃO\s+(\d{1,3})\b', txt.replace('\n',' ').strip())
-        if m:
-            y0=b[1] + (30 if not txt.replace('\n',' ').strip().startswith('QUESTÃO') else 0)
-            out.append({'n':int(m.group(1)), 'x0':b[0], 'y0':y0, 'x1':b[2], 'y1':b[3]})
-    return sorted(out, key=lambda z:(round(z['x0']/50), z['y0']))
+    for i,w in enumerate(words):
+        word=_norm_word(w[4])
+        if word not in ('QUESTAO','QUESTAO.'):
+            continue
+        if i+1 >= len(words):
+            continue
+        nxt=words[i+1]
+        raw=re.sub(r'[^0-9]','',nxt[4])
+        if not raw:
+            continue
+        n=int(raw)
+        if not 1 <= n <= 180:
+            continue
+        out.append({'n':n,'x0':w[0],'y0':w[1],'x1':nxt[2],'y1':max(w[3],nxt[3])})
+
+    # Fallback para PDFs cuja extração não separa as palavras como esperado.
+    if not out:
+        for b in page.get_text('blocks', sort=True):
+            txt=b[4].replace('\\n',' ')
+            m=re.search(r'QUEST[AÃ]O\\s+(\\d{1,3})\\b',txt,re.I)
+            if m:
+                out.append({'n':int(m.group(1)),'x0':b[0],'y0':b[1],'x1':b[2],'y1':b[3]})
+
+    # Remove apenas duplicatas da mesma posição.
+    unique=[]
+    seen=set()
+    for item in sorted(out,key=lambda z:(z['y0'],z['x0'])):
+        key=(item['n'],round(item['x0'],1),round(item['y0'],1))
+        if key not in seen:
+            seen.add(key)
+            unique.append(item)
+    return unique
+
 
 def column_bounds(page, x0):
     w=page.rect.width
@@ -170,57 +201,75 @@ def render_question_image(doc, page_idx, block, out_dir):
 
 def parse_gabarito(path):
     doc=fitz.open(path)
-    text='\n'.join(p.get_text() for p in doc)
+    text='\\n'.join(p.get_text() for p in doc)
+    doc.close()
     answers={}
 
-    # 1) Formato em que questão e resposta aparecem na mesma linha.
-    for n, ans in re.findall(r'(?m)^\s*(6|[7-9]|[1-9]\d|1[0-7]\d|180)\s+([A-E])\s*$', text):
-        answers[int(n)]={'ingles':ans,'espanhol':ans}
+    # Primeiro tenta linhas simples: 91 B / 136 A etc.
+    for n,ans in re.findall(r'(?m)^\\s*(9[1-9]|1[0-7]\\d|180)\\s+([A-E])\\s*$',text):
+        answers[int(n)]={'ingles':ans,'espanhol':ans,'anulada':False}
 
-    for n,a,b in re.findall(r'(?m)^\s*([1-5])\s+([A-E])\s+([A-E])\s*$', text):
-        answers[int(n)]={'ingles':a,'espanhol':b}
+    # Tabelas podem extrair número e resposta na mesma sequência, mas com
+    # espaços/quebras de linha diferentes.
+    normalized=re.sub(r'\\s+',' ',text)
+    for n,ans in re.findall(r'(?<!\\d)(9[1-9]|1[0-7]\\d|180)\\s+([A-E])(?![A-Z])',normalized):
+        answers[int(n)]={'ingles':ans,'espanhol':ans,'anulada':False}
 
-    # 2) Fallback para tabelas/colunas do PDF, onde número e letra
-    # podem ser extraídos em linhas ou blocos separados.
-    normalized=re.sub(r'\s+', ' ', text)
-    for n, ans in re.findall(r'(?<!\d)(9[1-9]|1[0-7]\d|180)\s+([A-E])(?![A-Z])', normalized):
-        answers[int(n)]={'ingles':ans,'espanhol':ans}
+    # Questões anuladas não recebem letra.
+    for n in re.findall(r'(?i)(?<!\\d)(9[1-9]|1[0-7]\\d|180)\\s+Anulado',normalized):
+        answers[int(n)]={'ingles':None,'espanhol':None,'anulada':True}
+
+    # 1º dia: questões 1–5 possuem duas colunas de idioma.
+    for n,a,b in re.findall(r'(?m)^\\s*([1-5])\\s+([A-E])\\s+([A-E])\\s*$',text):
+        answers[int(n)]={'ingles':a,'espanhol':b,'anulada':False}
 
     return answers
+
 
 def parse_prova(path, gabarito_path, language='ingles', exam_type='humanas', out_dir=None):
     doc=fitz.open(path)
     answers=parse_gabarito(gabarito_path)
     if out_dir is None:
-        out_dir=os.path.join(GENERATED, uuid.uuid4().hex)
-    os.makedirs(out_dir, exist_ok=True)
+        out_dir=os.path.join(GENERATED,uuid.uuid4().hex)
+    os.makedirs(out_dir,exist_ok=True)
+
     questions=[]
     seen=set()
+    expected_start=1 if exam_type=='humanas' else 91
+    expected_end=90 if exam_type=='humanas' else 180
+
     for pi in range(len(doc)):
         page=doc[pi]
         for block in find_question_blocks(page):
             n=block['n']
-            if exam_type == 'humanas':
-                if not (1 <= n <= 90):
-                    continue
-                if 1 <= n <= 5:
-                    if language=='ingles' and not ((n in (1,2,3) and pi==1) or (n in (4,5) and pi==2 and block['x0']<doc[pi].rect.width/2)):
-                        continue
-                    if language=='espanhol' and not ((n==1 and pi==2 and block['x0']>doc[pi].rect.width/2) or (n in (2,3,4,5) and pi==3)):
-                        continue
-            else:
-                if not (91 <= n <= 180):
-                    continue
-            if n in seen:
+            if not expected_start <= n <= expected_end or n in seen:
                 continue
-            # A imagem da questão é independente do reconhecimento do gabarito.
-            # Assim, um layout diferente no PDF do gabarito nunca deixa a prova vazia.
-            image=render_question_image(doc, pi, block, out_dir)
+
+            # No 1º dia, seleciona apenas uma versão das questões de idioma 1–5.
+            if exam_type=='humanas' and 1 <= n <= 5:
+                if language=='ingles':
+                    valid=((n in (1,2,3) and pi==1) or
+                           (n in (4,5) and pi==2 and block['x0'] < page.rect.width/2))
+                else:
+                    valid=((n==1 and pi==2 and block['x0'] > page.rect.width/2) or
+                           (n in (2,3,4,5) and pi==3))
+                if not valid:
+                    continue
+
+            image=render_question_image(doc,pi,block,out_dir)
             answer_data=answers.get(n,{})
-            questions.append({'numero':n,'imagem':image,'resposta':answer_data.get(language)})
+            questions.append({
+                'numero':n,
+                'imagem':image,
+                'resposta':answer_data.get(language),
+                'anulada':bool(answer_data.get('anulada',False))
+            })
             seen.add(n)
+
+    doc.close()
     questions.sort(key=lambda q:q['numero'])
-    return questions, out_dir
+    return questions,out_dir
+
 
 def make_wrong_pdf(prova_path, question_records, selected_numbers, output_path):
     out=fitz.open()
@@ -242,97 +291,132 @@ def index():
 
 @app.route('/importar',methods=['POST'])
 def importar():
-    prova=request.files.get('prova'); gabarito=request.files.get('gabarito'); exam_type=request.form.get('exam_type','humanas'); language=request.form.get('language','ingles')
-    if not prova or not gabarito:
-        flash('Selecione o PDF da prova e o PDF do gabarito.'); return redirect(url_for('index'))
-    # O upload fica temporariamente dentro da pasta da categoria.
-    # Depois da validação, o arquivo é apenas renomeado/movido para o nome final.
-    type_dir='humanas' if exam_type=='humanas' else 'exatas'
-    upload_dir=os.path.join(UPLOADS,type_dir)
-    os.makedirs(upload_dir,exist_ok=True)
+    prova=request.files.get('prova')
+    gabarito=request.files.get('gabarito')
+    exam_type=request.form.get('exam_type','humanas')
+    language=request.form.get('language','ingles')
 
+    if not prova or not gabarito or not prova.filename or not gabarito.filename:
+        flash('Selecione o PDF da prova e o PDF do gabarito.')
+        return redirect(url_for('index'))
+
+    if exam_type not in ('humanas','exatas'):
+        flash('Tipo de prova inválido.')
+        return redirect(url_for('index'))
+
+    # 1. Salva cada upload em temporário único. Nada é criado na pasta final ainda.
     token=uuid.uuid4().hex
-    ptmp=os.path.join(upload_dir,f'.upload_{token}_prova.tmp.pdf')
-    gtmp=os.path.join(upload_dir,f'.upload_{token}_gabarito.tmp.pdf')
-
+    staging=os.path.join(UPLOADS,'.staging')
+    os.makedirs(staging,exist_ok=True)
+    ptmp=os.path.join(staging,f'{token}_prova.pdf')
+    gtmp=os.path.join(staging,f'{token}_gabarito.pdf')
     prova.save(ptmp)
     gabarito.save(gtmp)
 
-    if os.path.getsize(ptmp) == 0 or os.path.getsize(gtmp) == 0:
-        for temp_path in (ptmp, gtmp):
-            try: os.remove(temp_path)
-            except OSError: pass
-        flash('Um dos arquivos enviados está vazio (0 bytes). Selecione novamente a prova e o gabarito em PDF.')
-        return redirect(url_for('index'))
-
-    # Confirma que os arquivos são PDFs válidos antes de dar o nome definitivo.
     try:
-        for pdf_path in (ptmp, gtmp):
-            test_doc=fitz.open(pdf_path)
-            if test_doc.page_count == 0:
-                raise ValueError('PDF sem páginas')
-            test_doc.close()
-    except Exception as e:
-        for temp_path in (ptmp, gtmp):
-            try: os.remove(temp_path)
-            except OSError: pass
-        flash('Um dos arquivos enviados não é um PDF válido: '+str(e))
-        return redirect(url_for('index'))
+        if os.path.getsize(ptmp)==0 or os.path.getsize(gtmp)==0:
+            raise ValueError('um dos arquivos enviados está vazio')
 
-    ph=file_sha256(ptmp); gh=file_sha256(gtmp)
-    sid=hashlib.sha256(f'{ph}:{gh}:{exam_type}:{language}'.encode()).hexdigest()[:24]
+        # 2. Abre os dois PDFs antes de alterar qualquer arquivo definitivo.
+        test=fitz.open(ptmp)
+        if test.page_count==0:
+            test.close()
+            raise ValueError('a prova não possui páginas')
+        test.close()
+        test=fitz.open(gtmp)
+        if test.page_count==0:
+            test.close()
+            raise ValueError('o gabarito não possui páginas')
+        test.close()
 
-    asset_dir=os.path.join(GENERATED,type_dir,sid)
-    os.makedirs(asset_dir,exist_ok=True)
+        ph=file_sha256(ptmp)
+        gh=file_sha256(gtmp)
+        sid=hashlib.sha256(f'{ph}:{gh}:{exam_type}:{language}'.encode()).hexdigest()[:24]
 
-    ppath=os.path.join(upload_dir,f'{sid}_prova.pdf')
-    gpath=os.path.join(upload_dir,f'{sid}_gabarito.pdf')
+        type_dir='humanas' if exam_type=='humanas' else 'exatas'
+        upload_dir=os.path.join(UPLOADS,type_dir)
+        final_assets=os.path.join(GENERATED,type_dir,sid)
+        os.makedirs(upload_dir,exist_ok=True)
 
-    # Não fazemos uma segunda cópia: o temporário validado é movido/renomeado.
-    os.replace(ptmp,ppath)
-    os.replace(gtmp,gpath)
+        ppath=os.path.join(upload_dir,f'{sid}_prova.pdf')
+        gpath=os.path.join(upload_dir,f'{sid}_gabarito.pdf')
 
-    if os.path.getsize(ppath) == 0 or os.path.getsize(gpath) == 0:
-        flash('O PDF salvo ficou vazio (0 bytes). Tente selecionar novamente os arquivos.')
-        return redirect(url_for('index'))
+        # 3. Se a prova já foi importada e os arquivos/imagens continuam válidos,
+        # reutiliza tudo. Nenhuma imagem é recriada.
+        existing=EXAMS.get(sid)
+        if existing and os.path.isfile(ppath) and os.path.isfile(gpath) and os.path.isdir(final_assets):
+            session['exam_id']=sid
+            flash('Esta prova já está salva. Abrindo a prova existente sem duplicar arquivos.')
+            return redirect(url_for('prova'))
 
-    if sid in EXAMS:
+        # 4. Gera imagens em staging. Só publica depois de encontrar exatamente 90.
+        image_stage=os.path.join(GENERATED,'.staging',sid)
+        if os.path.isdir(image_stage):
+            import shutil
+            shutil.rmtree(image_stage)
+        os.makedirs(image_stage,exist_ok=True)
+
+        questions,_=parse_prova(ptmp,gtmp,language,exam_type,image_stage)
+
+        expected_start=1 if exam_type=='humanas' else 91
+        expected_end=90 if exam_type=='humanas' else 180
+        expected=set(range(expected_start,expected_end+1))
+        found={q['numero'] for q in questions}
+        missing=sorted(expected-found)
+
+        if len(questions)!=90 or missing:
+            import shutil
+            shutil.rmtree(image_stage,ignore_errors=True)
+            raise ValueError(
+                f'foram encontradas {len(questions)}/90 questões. '
+                f'Faltando: {", ".join(map(str,missing[:15]))}'
+            )
+
+        # 5. Publica os PDFs definitivos somente após a prova inteira ter sido lida.
+        # É um único arquivo final por prova, identificado pelo hash.
+        os.replace(ptmp,ppath)
+        os.replace(gtmp,gpath)
+
+        import shutil
+        if os.path.isdir(final_assets):
+            shutil.rmtree(final_assets)
+        os.makedirs(os.path.dirname(final_assets),exist_ok=True)
+        os.replace(image_stage,final_assets)
+
+        for q in questions:
+            q['asset_dir']=final_assets
+
+        EXAMS[sid]={
+            'prova':ppath,
+            'gabarito':gpath,
+            'language':language,
+            'exam_type':exam_type,
+            'title':('ENEM — 1º Dia — Caderno Azul' if exam_type=='humanas' else 'ENEM — 2º Dia — Caderno Azul'),
+            'questions':questions,
+            'asset_dir':final_assets,
+            'answers':{},
+            'chutes':set(),
+            'current_question':0,
+            'started_at':time.time(),
+            'paused':False,
+            'paused_remaining':DURATION_SECONDS,
+            'completed':False,
+            'updated_at':time.time(),
+            'history':[]
+        }
+        save_catalog()
         session['exam_id']=sid
-        flash('Esta prova já está salva. Reabrindo a prova existente, sem duplicar imagens.')
+        flash(f'Prova importada com sucesso: 90 questões. Nenhuma cópia de imagens foi criada.')
         return redirect(url_for('prova'))
 
-    try:
-        questions,tmp_dir=parse_prova(ppath,gpath,language,exam_type)
     except Exception as e:
-        flash('Não foi possível interpretar os PDFs: '+str(e))
+        # Nunca deixa temporários ou uma prova parcialmente importada.
+        for temp_path in (ptmp,gtmp):
+            try: os.remove(temp_path)
+            except OSError: pass
+        flash('Não foi possível importar os PDFs: '+str(e))
         return redirect(url_for('index'))
 
-    for name in os.listdir(tmp_dir):
-        src=os.path.join(tmp_dir,name); dst=os.path.join(asset_dir,name)
-        if not os.path.exists(dst): os.replace(src,dst)
-    try: os.rmdir(tmp_dir)
-    except OSError: pass
-    for q in questions: q['asset_dir']=asset_dir
-
-    expected_start=1 if exam_type=='humanas' else 91
-    expected_end=90 if exam_type=='humanas' else 180
-    expected=set(range(expected_start,expected_end+1))
-    found={q['numero'] for q in questions}
-    missing=sorted(expected-found)
-
-    if not questions:
-        flash(f'Nenhuma questão foi encontrada no PDF. Para {type_dir}, o caderno precisa conter as questões {expected_start}–{expected_end}.')
-        return redirect(url_for('index'))
-    if missing:
-        preview=', '.join(map(str,missing[:12]))
-        suffix='...' if len(missing)>12 else ''
-        flash(f'Importação parcial: {len(questions)}/90 questões encontradas. Faltando: {preview}{suffix}. Verifique se o PDF é o caderno correto.')
-    else:
-        flash(f'Prova importada com sucesso: 90 questões. Imagens geradas em {type_dir}/{sid}.')
-
-    EXAMS[sid]={'prova':ppath,'gabarito':gpath,'language':language,'exam_type':exam_type,'title':('ENEM — 1º Dia — Caderno Azul' if exam_type=='humanas' else 'ENEM — 2º Dia — Caderno Azul'),'questions':questions,'asset_dir':asset_dir,'answers':{},'chutes':set(),'current_question':0,'started_at':time.time(),'paused':False,'paused_remaining':DURATION_SECONDS,'completed':False,'updated_at':time.time(),'history':[]}
-    save_catalog(); session['exam_id']=sid
-    return redirect(url_for('prova'))
 
 @app.route('/refazer/<sid>', methods=['POST'])
 def refazer(sid):
