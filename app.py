@@ -443,7 +443,7 @@ def importar():
             'gabarito':gpath,
             'language':language,
             'exam_type':exam_type,
-            'title':(cover.get('title') or ('ENEM — 1º Dia — Caderno Azul' if exam_type=='humanas' else 'ENEM — 2º Dia — Caderno Azul')),
+            'title':(cover.get('title') if cover.get('title') and cover.get('day') else ((cover.get('title') + ' — ' if cover.get('title') else 'ENEM — ') + ('1º Dia' if exam_type=='humanas' else '2º Dia') + (' — Caderno Azul' if not cover.get('booklet') else ''))),
             'questions':questions,
             'asset_dir':final_assets,
             'answers':{},
