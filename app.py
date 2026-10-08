@@ -58,6 +58,7 @@ def load_exams():
         with open(CATALOG,encoding='utf-8') as f: data=json.load(f)
     except (OSError,json.JSONDecodeError): return
     for sid,e in data.items():
+        e.setdefault('exam_type','humanas')
         if os.path.exists(e.get('prova','')) and os.path.exists(e.get('gabarito','')) and os.path.isdir(e.get('asset_dir','')):
             e['chutes']=set(e.get('chutes',[])); e.setdefault('answers',{}); e.setdefault('current_question',0); e.setdefault('started_at',None); e.setdefault('paused',False); e.setdefault('paused_remaining',DURATION_SECONDS); e.setdefault('completed',False); e.setdefault('updated_at',0); e.setdefault('history',[]); EXAMS[sid]=e
 
@@ -67,8 +68,11 @@ def timestamp_br(value):
     return time.strftime('%d/%m/%Y %H:%M', time.localtime(float(value)))
 app.jinja_env.filters['timestamp_br']=timestamp_br
 
-def area_for_question(numero):
-    return 'Linguagens' if int(numero) <= 45 else 'Ciências Humanas'
+def area_for_question(exam, numero):
+    n=int(numero)
+    if exam.get('exam_type','humanas') == 'exatas':
+        return 'Ciências da Natureza' if 91 <= n <= 135 else 'Matemática'
+    return 'Linguagens' if n <= 45 else 'Ciências Humanas'
 
 def build_result(exam):
     answers=exam.get('answers',{})
@@ -78,7 +82,7 @@ def build_result(exam):
         n=q['numero']
         user=answers.get(str(n))
         ok=user==q['resposta']
-        rows.append({'numero':n,'user':user or '—','correct':q['resposta'],'ok':ok,'chute':n in chutes,'area':area_for_question(n)})
+        rows.append({'numero':n,'user':user or '—','correct':q['resposta'],'ok':ok,'chute':n in chutes,'area':area_for_question(exam,n)})
     return rows
 
 def record_history(exam):
@@ -131,7 +135,7 @@ def find_question_blocks(page):
     out=[]
     for b in page.get_text('blocks'):
         txt=b[4].strip()
-        m=re.search(r'QUESTÃO\s+(\d{1,2})\b', txt.replace('\n',' ').strip())
+        m=re.search(r'QUESTÃO\s+(\d{1,3})\b', txt.replace('\n',' ').strip())
         if m:
             y0=b[1] + (30 if not txt.replace('\n',' ').strip().startswith('QUESTÃO') else 0)
             out.append({'n':int(m.group(1)), 'x0':b[0], 'y0':y0, 'x1':b[2], 'y1':b[3]})
@@ -173,7 +177,7 @@ def parse_gabarito(path):
         answers[int(n)]={'ingles':ans,'espanhol':ans}
     return answers
 
-def parse_prova(path, gabarito_path, language='ingles'):
+def parse_prova(path, gabarito_path, language='ingles', exam_type='humanas'):
     doc=fitz.open(path)
     answers=parse_gabarito(gabarito_path)
     out_dir=os.path.join(GENERATED, uuid.uuid4().hex)
@@ -221,12 +225,12 @@ def index():
 
 @app.route('/importar',methods=['POST'])
 def importar():
-    prova=request.files.get('prova'); gabarito=request.files.get('gabarito'); language=request.form.get('language','ingles')
+    prova=request.files.get('prova'); gabarito=request.files.get('gabarito'); exam_type=request.form.get('exam_type','humanas'); language=request.form.get('language','ingles')
     if not prova or not gabarito:
         flash('Selecione o PDF da prova e o PDF do gabarito.'); return redirect(url_for('index'))
     temp=uuid.uuid4().hex; ptmp=os.path.join(UPLOADS,temp+'_prova.pdf'); gtmp=os.path.join(UPLOADS,temp+'_gabarito.pdf')
     prova.save(ptmp); gabarito.save(gtmp)
-    ph=file_sha256(ptmp); gh=file_sha256(gtmp); sid=hashlib.sha256(f'{ph}:{gh}:{language}'.encode()).hexdigest()[:24]
+    ph=file_sha256(ptmp); gh=file_sha256(gtmp); sid=hashlib.sha256(f'{ph}:{gh}:{exam_type}:{language}'.encode()).hexdigest()[:24]
     ppath=os.path.join(UPLOADS,sid+'_prova.pdf'); gpath=os.path.join(UPLOADS,sid+'_gabarito.pdf')
     if os.path.exists(ppath): os.remove(ptmp)
     else: os.replace(ptmp,ppath)
@@ -236,7 +240,7 @@ def importar():
         session['exam_id']=sid; flash('Esta prova já está salva. Reabrindo a prova existente, sem duplicar imagens.'); return redirect(url_for('prova'))
     asset_dir=os.path.join(GENERATED,sid)
     try:
-        questions,tmp_dir=parse_prova(ppath,gpath,language)
+        questions,tmp_dir=parse_prova(ppath,gpath,language,exam_type)
     except Exception as e:
         flash('Não foi possível interpretar os PDFs: '+str(e)); return redirect(url_for('index'))
     os.makedirs(asset_dir,exist_ok=True)
@@ -247,7 +251,7 @@ def importar():
     except OSError: pass
     for q in questions: q['asset_dir']=asset_dir
     if len(questions)!=90: flash(f'Importação parcial: foram identificadas {len(questions)} questões. Verifique os PDFs correspondentes.')
-    EXAMS[sid]={'prova':ppath,'gabarito':gpath,'language':language,'title':'ENEM — Caderno Azul','questions':questions,'asset_dir':asset_dir,'answers':{},'chutes':set(),'current_question':0,'started_at':time.time(),'paused':False,'paused_remaining':DURATION_SECONDS,'completed':False,'updated_at':time.time(),'history':[]}
+    EXAMS[sid]={'prova':ppath,'gabarito':gpath,'language':language,'exam_type':exam_type,'title':('ENEM — 1º Dia — Caderno Azul' if exam_type=='humanas' else 'ENEM — 2º Dia — Caderno Azul'),'questions':questions,'asset_dir':asset_dir,'answers':{},'chutes':set(),'current_question':0,'started_at':time.time(),'paused':False,'paused_remaining':DURATION_SECONDS,'completed':False,'updated_at':time.time(),'history':[]}
     save_catalog(); session['exam_id']=sid
     return redirect(url_for('prova'))
 
