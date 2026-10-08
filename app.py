@@ -245,29 +245,6 @@ def importar():
     prova=request.files.get('prova'); gabarito=request.files.get('gabarito'); exam_type=request.form.get('exam_type','humanas'); language=request.form.get('language','ingles')
     if not prova or not gabarito:
         flash('Selecione o PDF da prova e o PDF do gabarito.'); return redirect(url_for('index'))
-    temp=uuid.uuid4().hex; ptmp=os.path.join(UPLOADS,temp+'_prova.pdf'); gtmp=os.path.join(UPLOADS,temp+'_gabarito.pdf')
-    prova.save(ptmp); gabarito.save(gtmp)
-    ph=file_sha256(ptmp); gh=file_sha256(gtmp); sid=hashlib.sha256(f'{ph}:{gh}:{exam_type}:{language}'.encode()).hexdigest()[:24]
-    ppath=os.path.join(UPLOADS,sid+'_prova.pdf'); gpath=os.path.join(UPLOADS,sid+'_gabarito.pdf')
-    if os.path.exists(ppath): os.remove(ptmp)
-    else: os.replace(ptmp,ppath)
-    if os.path.exists(gpath): os.remove(gtmp)
-    else: os.replace(gtmp,gpath)
-    if sid in EXAMS:
-        session['exam_id']=sid; flash('Esta prova já está salva. Reabrindo a prova existente, sem duplicar imagens.'); return redirect(url_for('prova'))
-    asset_dir=os.path.join(GENERATED,sid)
-    try:
-        questions,tmp_dir=parse_prova(ppath,gpath,language,exam_type)
-    except Exception as e:
-        flash('Não foi possível interpretar os PDFs: '+str(e)); return redirect(url_for('index'))
-    os.makedirs(asset_dir,exist_ok=True)
-    for name in os.listdir(tmp_dir):
-        src=os.path.join(tmp_dir,name); dst=os.path.join(asset_dir,name)
-        if not os.path.exists(dst): os.replace(src,dst)
-    try: os.rmdir(tmp_dir)
-    except OSError: pass
-    for q in questions: q['asset_dir']=asset_dir
-    if len(questions)!=90: flash(f'Importação parcial: foram identificadas {len(questions)} questões. Verifique os PDFs correspondentes.')
     temp=uuid.uuid4().hex
     ptmp=os.path.join(UPLOADS,temp+'_prova.pdf')
     gtmp=os.path.join(UPLOADS,temp+'_gabarito.pdf')
