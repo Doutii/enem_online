@@ -1,6 +1,7 @@
 from flask import Flask, render_template, request, redirect, url_for, send_file, session, flash, jsonify
 import fitz
 import os, re, json, uuid, time, hashlib
+from threading import Lock
 from werkzeug.utils import secure_filename
 
 BASE = os.path.dirname(os.path.abspath(__file__))
@@ -17,6 +18,7 @@ app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'enem-online-local-change-me')
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024
 EXAMS = {}
+CATALOG_LOCK = Lock()
 
 def file_sha256(path):
     h=hashlib.sha256()
@@ -29,9 +31,26 @@ def save_catalog():
     for sid,e in EXAMS.items():
         data[sid]={k:v for k,v in e.items() if k!='chutes'}
         data[sid]['chutes']=sorted(e.get('chutes',set()))
-    tmp=CATALOG+'.tmp'
-    with open(tmp,'w',encoding='utf-8') as f: json.dump(data,f,ensure_ascii=False,indent=2)
-    os.replace(tmp,CATALOG)
+    os.makedirs(DATA, exist_ok=True)
+    with CATALOG_LOCK:
+        tmp=f"{CATALOG}.{uuid.uuid4().hex}.tmp"
+        try:
+            with open(tmp,'w',encoding='utf-8') as f:
+                json.dump(data,f,ensure_ascii=False,indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            for _ in range(5):
+                try:
+                    os.replace(tmp,CATALOG)
+                    break
+                except PermissionError:
+                    time.sleep(0.15)
+            else:
+                raise PermissionError(f"Não foi possível substituir {CATALOG}; o arquivo pode estar em uso.")
+        finally:
+            if os.path.exists(tmp):
+                try: os.remove(tmp)
+                except OSError: pass
 
 def load_exams():
     if not os.path.exists(CATALOG): return
