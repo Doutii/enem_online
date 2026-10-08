@@ -389,6 +389,20 @@ def importar():
         for q in questions:
             q['asset_dir']=final_assets
 
+        # Remove somente artefatos legados da mesma prova que ficaram na
+        # estrutura antiga. Não toca em outras provas.
+        legacy_prova=os.path.join(UPLOADS,f'{sid}_prova.pdf')
+        legacy_gabarito=os.path.join(UPLOADS,f'{sid}_gabarito.pdf')
+        legacy_assets=os.path.join(GENERATED,sid)
+        for legacy_path in (legacy_prova,legacy_gabarito):
+            try:
+                if os.path.abspath(legacy_path) != os.path.abspath(ppath) and os.path.isfile(legacy_path):
+                    os.remove(legacy_path)
+            except OSError:
+                pass
+        if os.path.abspath(legacy_assets) != os.path.abspath(final_assets) and os.path.isdir(legacy_assets):
+            shutil.rmtree(legacy_assets,ignore_errors=True)
+
         EXAMS[sid]={
             'prova':ppath,
             'gabarito':gpath,
