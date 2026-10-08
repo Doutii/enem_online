@@ -68,6 +68,38 @@ def timestamp_br(value):
     return time.strftime('%d/%m/%Y %H:%M', time.localtime(float(value)))
 app.jinja_env.filters['timestamp_br']=timestamp_br
 
+def identify_exam_cover(path):
+    """Tenta identificar ano, dia, caderno e cor pela capa/texto inicial do PDF."""
+    doc=fitz.open(path)
+    first_text='\\n'.join(doc[i].get_text() for i in range(min(3,len(doc))))
+    doc.close()
+    normalized=_norm_word(first_text)
+    year_match=re.search(r'\\b(20(?:0\\d|1\\d|2\\d))\\b',normalized)
+    year=year_match.group(1) if year_match else None
+
+    day=None
+    if re.search(r'\\b2\\s*(?:O|º|°)?\\s*DIA\\b|SEGUNDO\\s+DIA',normalized):
+        day=2
+    elif re.search(r'\\b1\\s*(?:O|º|°)?\\s*DIA\\b|PRIMEIRO\\s+DIA',normalized):
+        day=1
+
+    booklet_match=re.search(r'\\bCADERNO\\s*(?:DE\\s*)?(\\d{1,2})\\b',normalized)
+    booklet=booklet_match.group(1) if booklet_match else None
+    colors=('AZUL','AMARELO','BRANCO','ROSA','VERDE','CINZA','LARANJA')
+    color=next((c.title() for c in colors if re.search(r'\\b'+c+r'\\b',normalized)),None)
+
+    # Faixa de numeração é um fallback caso a capa não explicite o dia.
+    if day is None:
+        all_text=' '.join(doc.get_text() for doc in [])  # evita reabrir/alterar o PDF
+    exam_type='exatas' if day==2 else 'humanas' if day==1 else None
+    parts=[]
+    if year: parts.append('ENEM '+year)
+    if day: parts.append(f'{day}º Dia')
+    if booklet: parts.append('Caderno '+booklet)
+    if color: parts.append(color)
+    title=' — '.join(parts) if parts else None
+    return {'year':year,'day':day,'booklet':booklet,'color':color,'exam_type':exam_type,'title':title,'detected':bool(year or day or booklet or color)}
+
 def area_for_question(exam, numero):
     n=int(numero)
     if exam.get('exam_type','humanas') == 'exatas':
@@ -332,6 +364,12 @@ def importar():
             raise ValueError('o gabarito não possui páginas')
         test.close()
 
+        cover=identify_exam_cover(ptmp)
+        if cover.get('exam_type'):
+            exam_type=cover['exam_type']
+        if exam_type=='humanas' and language not in ('ingles','espanhol'):
+            language='ingles'
+
         ph=file_sha256(ptmp)
         gh=file_sha256(gtmp)
         sid=hashlib.sha256(f'{ph}:{gh}:{exam_type}:{language}'.encode()).hexdigest()[:24]
@@ -408,7 +446,7 @@ def importar():
             'gabarito':gpath,
             'language':language,
             'exam_type':exam_type,
-            'title':('ENEM — 1º Dia — Caderno Azul' if exam_type=='humanas' else 'ENEM — 2º Dia — Caderno Azul'),
+            'title':(cover.get('title') or ('ENEM — 1º Dia — Caderno Azul' if exam_type=='humanas' else 'ENEM — 2º Dia — Caderno Azul')),
             'questions':questions,
             'asset_dir':final_assets,
             'answers':{},
@@ -423,7 +461,7 @@ def importar():
         }
         save_catalog()
         session['exam_id']=sid
-        flash(f'Prova importada com sucesso: 90 questões. Nenhuma cópia de imagens foi criada.')
+        flash(f'Prova identificada: {EXAMS[sid][\'title\']}. Importação concluída com 90 questões.')
         return redirect(url_for('prova'))
 
     except Exception as e:
@@ -433,6 +471,34 @@ def importar():
             except OSError: pass
         flash('Não foi possível importar os PDFs: '+str(e))
         return redirect(url_for('index'))
+
+
+@app.route('/excluir/<sid>',methods=['POST'])
+def excluir(sid):
+    exam=EXAMS.get(sid)
+    if not exam:
+        flash('Esta prova já não está na lista.')
+        return redirect(url_for('index'))
+
+    # Apaga primeiro do catálogo ativo e persiste; depois remove somente os
+    # arquivos pertencentes a esta prova.
+    EXAMS.pop(sid,None)
+    if session.get('exam_id')==sid:
+        session.pop('exam_id',None)
+    save_catalog()
+
+    import shutil
+    for key in ('prova','gabarito'):
+        path=exam.get(key)
+        if path and os.path.isfile(path):
+            try: os.remove(path)
+            except OSError: pass
+    asset_dir=exam.get('asset_dir')
+    if asset_dir and os.path.isdir(asset_dir):
+        try: shutil.rmtree(asset_dir)
+        except OSError: pass
+    flash('Prova excluída.')
+    return redirect(url_for('index'))
 
 
 @app.route('/refazer/<sid>', methods=['POST'])
