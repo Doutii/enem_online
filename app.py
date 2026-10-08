@@ -250,6 +250,15 @@ def importar():
     gtmp=os.path.join(UPLOADS,temp+'_gabarito.pdf')
     prova.save(ptmp); gabarito.save(gtmp)
 
+    # Nunca tente interpretar um PDF vazio. Isso também evita que uma
+    # tentativa anterior com upload inválido deixe um arquivo corrompido salvo.
+    if os.path.getsize(ptmp) == 0 or os.path.getsize(gtmp) == 0:
+        for temp_path in (ptmp, gtmp):
+            try: os.remove(temp_path)
+            except OSError: pass
+        flash('Um dos arquivos enviados está vazio (0 bytes). Selecione novamente a prova e o gabarito em PDF.')
+        return redirect(url_for('index'))
+
     ph=file_sha256(ptmp); gh=file_sha256(gtmp)
     sid=hashlib.sha256(f'{ph}:{gh}:{exam_type}:{language}'.encode()).hexdigest()[:24]
 
@@ -262,10 +271,15 @@ def importar():
     ppath=os.path.join(upload_dir,f'{sid}_prova.pdf')
     gpath=os.path.join(upload_dir,f'{sid}_gabarito.pdf')
 
-    if os.path.exists(ppath): os.remove(ptmp)
-    else: os.replace(ptmp,ppath)
-    if os.path.exists(gpath): os.remove(gtmp)
-    else: os.replace(gtmp,gpath)
+    # O mesmo PDF pode ser importado novamente: substituímos o arquivo
+    # anterior pelo upload atual, em vez de apagar silenciosamente o temporário.
+    os.replace(ptmp, ppath)
+    os.replace(gtmp, gpath)
+
+    # Proteção extra contra arquivos antigos de 0 bytes.
+    if os.path.getsize(ppath) == 0 or os.path.getsize(gpath) == 0:
+        flash('O PDF salvo ficou vazio (0 bytes). Tente selecionar novamente os arquivos.')
+        return redirect(url_for('index'))
 
     if sid in EXAMS:
         session['exam_id']=sid
