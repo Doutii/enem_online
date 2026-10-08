@@ -251,9 +251,23 @@ def parse_gabarito(path):
     for n in re.findall(r'(?i)(?<!\d)(9[1-9]|1[0-7]\d|180)\s+Anulado',normalized):
         answers[int(n)]={'ingles':None,'espanhol':None,'anulada':True}
 
-    # 1º dia: questões 1–5 possuem duas colunas de idioma.
-    for n,a,b in re.findall(r'(?m)^\s*([1-5])\s+([A-E])\s+([A-E])\s*$',text):
-        answers[int(n)]={'ingles':a,'espanhol':b,'anulada':False}
+    # Alguns gabaritos oficiais (como o ENEM 2025) extraem cada célula
+    # da tabela em uma linha separada. Faz uma leitura sequencial dos tokens
+    # para esses PDFs, mantendo compatibilidade com os formatos antigos.
+    lines=[line.strip() for line in text.splitlines() if line.strip()]
+    for i, token in enumerate(lines):
+        if not re.fullmatch(r'\d{1,3}', token):
+            continue
+        n=int(token)
+        if 1 <= n <= 5 and i+2 < len(lines):
+            a=lines[i+1].upper()
+            b=lines[i+2].upper()
+            if a in LETTERS and b in LETTERS:
+                answers[n]={'ingles':a,'espanhol':b,'anulada':False}
+        elif 6 <= n <= 90 and i+1 < len(lines):
+            ans=lines[i+1].upper()
+            if ans in LETTERS:
+                answers[n]={'ingles':ans,'espanhol':ans,'anulada':False}
 
     return answers
 
