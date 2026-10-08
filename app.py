@@ -215,28 +215,48 @@ def column_bounds(page, x0):
 
 def render_question_image(doc, page_idx, block, out_dir):
     page=doc[page_idx]
-    left,right=column_bounds(page, block['x0'])
-    same_left = block['x0'] < page.rect.width/2
-    # Questões de idioma (1–5) podem ter enunciado e imagem distribuídos
-    # pelas duas colunas; recortá-las como uma coluna corta imagens à direita.
-    # Nesses casos usamos a largura útil completa da página.
-    if 1 <= block['n'] <= 5:
-        left,right=8,page.rect.width-8
-    candidates=[b for b in find_question_blocks(page) if (b['x0'] < page.rect.width/2) == same_left and b['y0'] > block['y0']+2]
-    if candidates:
-        # Para antes da próxima questão, mas deixa uma folga maior abaixo
-        # do conteúdo da questão atual.
-        bottom=min(candidates, key=lambda b:b['y0'])['y0']-3
-    else:
-        # A última questão da coluna pode ocupar quase toda a parte inferior.
-        bottom=page.rect.height-18
-    top=max(0, block['y0']-12)
-    rect=fitz.Rect(left, top, right, bottom)
-    pix=page.get_pixmap(matrix=fitz.Matrix(1.6,1.6), clip=rect, alpha=False)
+    page_width=page.rect.width
+    page_height=page.rect.height
+    mid=page_width/2
+    same_left=block['x0'] < mid
+
+    # Primeiro delimita a questão pela próxima questão na mesma coluna.
+    all_questions=find_question_blocks(page)
+    candidates=[b for b in all_questions
+                if (b['x0'] < mid) == same_left and b['y0'] > block['y0']+2]
+    next_y=min((b['y0'] for b in candidates),default=page_height-12)
+
+    top=max(0,block['y0']-14)
+    bottom=min(page_height-6,next_y-2)
+    left,right=(8,mid-3) if same_left else (mid+3,page_width-8)
+
+    # Expande o recorte automaticamente quando o PDF tem imagem ou bloco
+    # de conteúdo que atravessa a divisão entre colunas. Isso evita cortar
+    # ilustrações sem incluir sempre a coluna vizinha inteira.
+    try:
+        layout=page.get_text('dict')
+        for item in layout.get('blocks',[]):
+            bbox=item.get('bbox')
+            if not bbox or len(bbox)<4:
+                continue
+            x0,y0,x1,y1=bbox[:4]
+            if y1 <= top or y0 >= bottom:
+                continue
+            is_image=('image' in item) or item.get('type')==1
+            if is_image and same_left and x0 < mid and x1 > right:
+                right=min(page_width-6,max(right,x1+8))
+            elif is_image and not same_left and x0 < left and x1 > mid:
+                left=max(6,min(left,x0-8))
+    except Exception:
+        pass
+
+    rect=fitz.Rect(left,top,right,bottom)
+    pix=page.get_pixmap(matrix=fitz.Matrix(1.6,1.6),clip=rect,alpha=False)
     filename=f"q{block['n']:02d}_{page_idx+1}.png"
-    path=os.path.join(out_dir, filename)
+    path=os.path.join(out_dir,filename)
     pix.save(path)
     return filename
+
 
 def parse_gabarito(path):
     doc=fitz.open(path)
