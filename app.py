@@ -205,11 +205,13 @@ def find_question_blocks(page):
 
 
 def column_bounds(page, x0):
+    # Margens ligeiramente mais abertas para preservar textos, alternativas
+    # e elementos próximos às bordas sem invadir a coluna vizinha.
     w=page.rect.width
     mid=w/2
     if x0 < mid:
-        return 18, mid-7
-    return mid+2, w-18
+        return 10, mid-3
+    return mid+3, w-10
 
 def render_question_image(doc, page_idx, block, out_dir):
     page=doc[page_idx]
@@ -217,10 +219,13 @@ def render_question_image(doc, page_idx, block, out_dir):
     same_left = block['x0'] < page.rect.width/2
     candidates=[b for b in find_question_blocks(page) if (b['x0'] < page.rect.width/2) == same_left and b['y0'] > block['y0']+2]
     if candidates:
-        bottom=min(candidates, key=lambda b:b['y0'])['y0']-10
+        # Para antes da próxima questão, mas deixa uma folga maior abaixo
+        # do conteúdo da questão atual.
+        bottom=min(candidates, key=lambda b:b['y0'])['y0']-3
     else:
-        bottom=page.rect.height-42
-    top=max(0, block['y0']-8)
+        # A última questão da coluna pode ocupar quase toda a parte inferior.
+        bottom=page.rect.height-18
+    top=max(0, block['y0']-12)
     rect=fitz.Rect(left, top, right, bottom)
     pix=page.get_pixmap(matrix=fitz.Matrix(1.6,1.6), clip=rect, alpha=False)
     filename=f"q{block['n']:02d}_{page_idx+1}.png"
