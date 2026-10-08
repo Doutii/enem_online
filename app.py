@@ -217,6 +217,11 @@ def render_question_image(doc, page_idx, block, out_dir):
     page=doc[page_idx]
     left,right=column_bounds(page, block['x0'])
     same_left = block['x0'] < page.rect.width/2
+    # Questões de idioma (1–5) podem ter enunciado e imagem distribuídos
+    # pelas duas colunas; recortá-las como uma coluna corta imagens à direita.
+    # Nesses casos usamos a largura útil completa da página.
+    if 1 <= block['n'] <= 5:
+        left,right=8,page.rect.width-8
     candidates=[b for b in find_question_blocks(page) if (b['x0'] < page.rect.width/2) == same_left and b['y0'] > block['y0']+2]
     if candidates:
         # Para antes da próxima questão, mas deixa uma folga maior abaixo
