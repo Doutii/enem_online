@@ -284,23 +284,22 @@ def parse_prova(path, gabarito_path, language='ingles', exam_type='humanas', out
     expected_start=1 if exam_type=='humanas' else 91
     expected_end=90 if exam_type=='humanas' else 180
 
+    question_language=None
     for pi in range(len(doc)):
         page=doc[pi]
+        page_text=_norm_word(page.get_text())
+        if 'OPCAO INGLES' in page_text:
+            question_language='ingles'
+        elif 'OPCAO ESPANHOL' in page_text:
+            question_language='espanhol'
+
         for block in find_question_blocks(page):
             n=block['n']
             if not expected_start <= n <= expected_end or n in seen:
                 continue
 
-            # No 1º dia, seleciona apenas uma versão das questões de idioma 1–5.
-            if exam_type=='humanas' and 1 <= n <= 5:
-                if language=='ingles':
-                    valid=((n in (1,2,3) and pi==1) or
-                           (n in (4,5) and pi==2 and block['x0'] < page.rect.width/2))
-                else:
-                    valid=((n==1 and pi==2 and block['x0'] > page.rect.width/2) or
-                           (n in (2,3,4,5) and pi==3))
-                if not valid:
-                    continue
+            if exam_type=='humanas' and 1 <= n <= 5 and question_language != language:
+                continue
 
             image=render_question_image(doc,pi,block,out_dir)
             answer_data=answers.get(n,{})
