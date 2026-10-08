@@ -81,8 +81,8 @@ def build_result(exam):
     for q in exam['questions']:
         n=q['numero']
         user=answers.get(str(n))
-        ok=user==q['resposta']
-        rows.append({'numero':n,'user':user or '—','correct':q['resposta'],'ok':ok,'chute':n in chutes,'area':area_for_question(exam,n)})
+        ok=q.get('resposta') is not None and user==q['resposta']
+        rows.append({'numero':n,'user':user or '—','correct':q.get('resposta') or '—','ok':ok,'chute':n in chutes,'area':area_for_question(exam,n)})
     return rows
 
 def record_history(exam):
