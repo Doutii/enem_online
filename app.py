@@ -201,26 +201,29 @@ def render_question_image(doc, page_idx, block, out_dir):
 
 def parse_gabarito(path):
     doc=fitz.open(path)
-    text='\\n'.join(p.get_text() for p in doc)
+    text='\n'.join(p.get_text() for p in doc)
     doc.close()
     answers={}
 
-    # Primeiro tenta linhas simples: 91 B / 136 A etc.
-    for n,ans in re.findall(r'(?m)^\\s*(9[1-9]|1[0-7]\\d|180)\\s+([A-E])\\s*$',text):
+    # 1º dia: questões 6–90 possuem uma única resposta.
+    for n,ans in re.findall(r'(?m)^\s*(6|[7-9]|[1-8]\d|90)\s+([A-E])\s*$',text):
         answers[int(n)]={'ingles':ans,'espanhol':ans,'anulada':False}
 
-    # 1º dia: questões 6–90 possuem uma única resposta.
-    for n,ans in re.findall(r'(?m)^\\s*(6|[7-9]|[1-8]\\d|90)\\s+([A-E])\\s*    # espaços/quebras de linha diferentes.
-    normalized=re.sub(r'\\s+',' ',text)
-    for n,ans in re.findall(r'(?<!\\d)(9[1-9]|1[0-7]\\d|180)\\s+([A-E])(?![A-Z])',normalized):
+    # 2º dia: questões 91–180 possuem uma única resposta.
+    for n,ans in re.findall(r'(?m)^\s*(9[1-9]|1[0-7]\d|180)\s+([A-E])\s*$',text):
+        answers[int(n)]={'ingles':ans,'espanhol':ans,'anulada':False}
+
+    # Fallback para tabelas cuja extração muda espaços/quebras de linha.
+    normalized=re.sub(r'\s+',' ',text)
+    for n,ans in re.findall(r'(?<!\d)(9[1-9]|1[0-7]\d|180)\s+([A-E])(?![A-Z])',normalized):
         answers[int(n)]={'ingles':ans,'espanhol':ans,'anulada':False}
 
     # Questões anuladas não recebem letra.
-    for n in re.findall(r'(?i)(?<!\\d)(9[1-9]|1[0-7]\\d|180)\\s+Anulado',normalized):
+    for n in re.findall(r'(?i)(?<!\d)(9[1-9]|1[0-7]\d|180)\s+Anulado',normalized):
         answers[int(n)]={'ingles':None,'espanhol':None,'anulada':True}
 
     # 1º dia: questões 1–5 possuem duas colunas de idioma.
-    for n,a,b in re.findall(r'(?m)^\\s*([1-5])\\s+([A-E])\\s+([A-E])\\s*$',text):
+    for n,a,b in re.findall(r'(?m)^\s*([1-5])\s+([A-E])\s+([A-E])\s*$',text):
         answers[int(n)]={'ingles':a,'espanhol':b,'anulada':False}
 
     return answers
