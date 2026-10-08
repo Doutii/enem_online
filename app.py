@@ -245,13 +245,19 @@ def importar():
     prova=request.files.get('prova'); gabarito=request.files.get('gabarito'); exam_type=request.form.get('exam_type','humanas'); language=request.form.get('language','ingles')
     if not prova or not gabarito:
         flash('Selecione o PDF da prova e o PDF do gabarito.'); return redirect(url_for('index'))
-    temp=uuid.uuid4().hex
-    ptmp=os.path.join(UPLOADS,temp+'_prova.pdf')
-    gtmp=os.path.join(UPLOADS,temp+'_gabarito.pdf')
-    prova.save(ptmp); gabarito.save(gtmp)
+    # O upload fica temporariamente dentro da pasta da categoria.
+    # Depois da validação, o arquivo é apenas renomeado/movido para o nome final.
+    type_dir='humanas' if exam_type=='humanas' else 'exatas'
+    upload_dir=os.path.join(UPLOADS,type_dir)
+    os.makedirs(upload_dir,exist_ok=True)
 
-    # Nunca tente interpretar um PDF vazio. Isso também evita que uma
-    # tentativa anterior com upload inválido deixe um arquivo corrompido salvo.
+    token=uuid.uuid4().hex
+    ptmp=os.path.join(upload_dir,f'.upload_{token}_prova.tmp.pdf')
+    gtmp=os.path.join(upload_dir,f'.upload_{token}_gabarito.tmp.pdf')
+
+    prova.save(ptmp)
+    gabarito.save(gtmp)
+
     if os.path.getsize(ptmp) == 0 or os.path.getsize(gtmp) == 0:
         for temp_path in (ptmp, gtmp):
             try: os.remove(temp_path)
@@ -259,24 +265,33 @@ def importar():
         flash('Um dos arquivos enviados está vazio (0 bytes). Selecione novamente a prova e o gabarito em PDF.')
         return redirect(url_for('index'))
 
+    # Confirma que os arquivos são PDFs válidos antes de dar o nome definitivo.
+    try:
+        for pdf_path in (ptmp, gtmp):
+            test_doc=fitz.open(pdf_path)
+            if test_doc.page_count == 0:
+                raise ValueError('PDF sem páginas')
+            test_doc.close()
+    except Exception as e:
+        for temp_path in (ptmp, gtmp):
+            try: os.remove(temp_path)
+            except OSError: pass
+        flash('Um dos arquivos enviados não é um PDF válido: '+str(e))
+        return redirect(url_for('index'))
+
     ph=file_sha256(ptmp); gh=file_sha256(gtmp)
     sid=hashlib.sha256(f'{ph}:{gh}:{exam_type}:{language}'.encode()).hexdigest()[:24]
 
-    type_dir='humanas' if exam_type=='humanas' else 'exatas'
-    upload_dir=os.path.join(UPLOADS,type_dir)
     asset_dir=os.path.join(GENERATED,type_dir,sid)
-    os.makedirs(upload_dir,exist_ok=True)
     os.makedirs(asset_dir,exist_ok=True)
 
     ppath=os.path.join(upload_dir,f'{sid}_prova.pdf')
     gpath=os.path.join(upload_dir,f'{sid}_gabarito.pdf')
 
-    # O mesmo PDF pode ser importado novamente: substituímos o arquivo
-    # anterior pelo upload atual, em vez de apagar silenciosamente o temporário.
-    os.replace(ptmp, ppath)
-    os.replace(gtmp, gpath)
+    # Não fazemos uma segunda cópia: o temporário validado é movido/renomeado.
+    os.replace(ptmp,ppath)
+    os.replace(gtmp,gpath)
 
-    # Proteção extra contra arquivos antigos de 0 bytes.
     if os.path.getsize(ppath) == 0 or os.path.getsize(gpath) == 0:
         flash('O PDF salvo ficou vazio (0 bytes). Tente selecionar novamente os arquivos.')
         return redirect(url_for('index'))
