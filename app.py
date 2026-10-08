@@ -97,8 +97,11 @@ def record_history(exam):
         'percent':round(correct*100/len(rows),1) if rows else 0,
         'chutes':chutes,
         'areas':{
-            'Linguagens': {'correct':sum(r['ok'] for r in rows if r['area']=='Linguagens'),'total':sum(1 for r in rows if r['area']=='Linguagens')},
-            'Ciências Humanas': {'correct':sum(r['ok'] for r in rows if r['area']=='Ciências Humanas'),'total':sum(1 for r in rows if r['area']=='Ciências Humanas')}
+            area: {
+                'correct':sum(r['ok'] for r in rows if r['area']==area),
+                'total':sum(1 for r in rows if r['area']==area)
+            }
+            for area in dict.fromkeys(r['area'] for r in rows)
         }
     }
     exam.setdefault('history',[]).append(record)
