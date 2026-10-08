@@ -220,19 +220,19 @@ def render_question_image(doc, page_idx, block, out_dir):
     mid=page_width/2
     same_left=block['x0'] < mid
 
-    # Primeiro delimita a questão pela próxima questão na mesma coluna.
-    all_questions=find_question_blocks(page)
-    candidates=[b for b in all_questions
+    # Limita verticalmente até a próxima questão na mesma coluna.
+    blocks=find_question_blocks(page)
+    candidates=[b for b in blocks
                 if (b['x0'] < mid) == same_left and b['y0'] > block['y0']+2]
-    next_y=min((b['y0'] for b in candidates),default=page_height-12)
-
+    next_y=min((b['y0'] for b in candidates),default=page_height-10)
     top=max(0,block['y0']-14)
-    bottom=min(page_height-6,next_y-2)
+    bottom=min(page_height-5,next_y-2)
+
     left,right=(8,mid-3) if same_left else (mid+3,page_width-8)
 
-    # Expande o recorte automaticamente quando o PDF tem imagem ou bloco
-    # de conteúdo que atravessa a divisão entre colunas. Isso evita cortar
-    # ilustrações sem incluir sempre a coluna vizinha inteira.
+    # Procura imagens que cruzam a divisória entre colunas ou aparecem na
+    # coluna oposta dentro da faixa vertical desta questão. Nesses casos,
+    # usa a largura total para não cortar o conteúdo gráfico pela metade.
     try:
         layout=page.get_text('dict')
         for item in layout.get('blocks',[]):
@@ -242,11 +242,13 @@ def render_question_image(doc, page_idx, block, out_dir):
             x0,y0,x1,y1=bbox[:4]
             if y1 <= top or y0 >= bottom:
                 continue
-            is_image=('image' in item) or item.get('type')==1
-            if is_image and same_left and x0 < mid and x1 > right:
-                right=min(page_width-6,max(right,x1+8))
-            elif is_image and not same_left and x0 < left and x1 > mid:
-                left=max(6,min(left,x0-8))
+            if not (('image' in item) or item.get('type')==1):
+                continue
+            crosses_mid=(x0 < mid-3 and x1 > mid+3)
+            opposite_column=(same_left and x0 >= mid) or ((not same_left) and x1 <= mid)
+            if crosses_mid or opposite_column:
+                left,right=8,page_width-8
+                break
     except Exception:
         pass
 
