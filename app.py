@@ -174,16 +174,16 @@ def parse_gabarito(path):
     answers={}
 
     # 1) Formato em que questão e resposta aparecem na mesma linha.
-    for n, ans in re.findall(r'(?m)^\s*(6|[7-9]|[1-9]\d|1[0-7]\d|180)\s+([A-E])\s*, text):
+    for n, ans in re.findall(r'(?m)^\s*(6|[7-9]|[1-9]\d|1[0-7]\d|180)\s+([A-E])\s*$', text):
         answers[int(n)]={'ingles':ans,'espanhol':ans}
 
-    for n,a,b in re.findall(r'(?m)^\s*([1-5])\s+([A-E])\s+([A-E])\s*, text):
+    for n,a,b in re.findall(r'(?m)^\s*([1-5])\s+([A-E])\s+([A-E])\s*$', text):
         answers[int(n)]={'ingles':a,'espanhol':b}
 
     # 2) Fallback para tabelas/colunas do PDF, onde número e letra
     # podem ser extraídos em linhas ou blocos separados.
     normalized=re.sub(r'\s+', ' ', text)
-    for n, ans in re.findall(r'(?<!\\d)(9[1-9]|1[0-7]\\d|180)\\s+([A-E])(?![A-Z])', normalized):
+    for n, ans in re.findall(r'(?<!\d)(9[1-9]|1[0-7]\d|180)\s+([A-E])(?![A-Z])', normalized):
         answers[int(n)]={'ingles':ans,'espanhol':ans}
 
     return answers
