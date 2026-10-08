@@ -172,9 +172,13 @@ def parse_gabarito(path):
     doc=fitz.open(path)
     text='\n'.join(p.get_text() for p in doc)
     answers={}
-    for n, ans in re.findall(r'(?m)^\s*(6|[7-9]|[1-9]\d|1[0-7]\d|180)\s+([A-E])\s*
+    # Questões 6–180 usam um único gabarito.
+    for n, ans in re.findall(r'(?m)^\s*(6|[7-9]|[1-9]\d|1[0-7]\d|180)\s+([A-E])\s*$', text):
+        answers[int(n)]={'ingles':ans,'espanhol':ans}
+    # Questões 1–5 possuem gabaritos separados para inglês e espanhol.
+    for n,a,b in re.findall(r'(?m)^\s*([1-5])\s+([A-E])\s+([A-E])\s*$', text):
+        answers[int(n)]={'ingles':a,'espanhol':b}
     return answers
-
 def parse_prova(path, gabarito_path, language='ingles', exam_type='humanas'):
     doc=fitz.open(path)
     answers=parse_gabarito(gabarito_path)
